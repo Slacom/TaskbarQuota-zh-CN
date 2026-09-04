@@ -7,6 +7,7 @@
     xmlns:tk="using:CommunityToolkit.WinUI.Controls"
     xmlns:vm="using:TaskbarQuota.ViewModels"
     xmlns:controls="using:TaskbarQuota.Controls"
+    xmlns:loc="using:TaskbarQuota.Localization"
     mc:Ignorable="d"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -18,92 +19,92 @@
                   HorizontalContentAlignment="Stretch">
         <StackPanel Spacing="6" HorizontalAlignment="Stretch">
 
-            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,8"/>
+            <TextBlock Text="{loc:Zh Text=Settings}" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,8"/>
 
             <!-- Explains a refused pin, matching DashboardPage. A tooltip is no use here: the user has just
                  selected a destination and watched it revert, so the reason has to appear unprompted. -->
             <muxc:InfoBar x:Name="PinBlockedBar"
                           Severity="Warning"
-                          Title="Can't pin this provider"
+                          Title="无法固定此服务"
                           IsOpen="False"
                           IsClosable="True"
                           Margin="0,0,0,4"/>
 
-            <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,8,0,2"/>
+            <TextBlock Text="{loc:Zh Text=Appearance}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,8,0,2"/>
 
-            <tk:SettingsCard Header="Theme" Description="Choose how TaskbarQuota looks.">
+            <tk:SettingsCard Header="{loc:Zh Text=Theme}" Description="选择 TaskbarQuota 的外观主题。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE771;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="ThemeCombo" SelectionChanged="OnThemeChanged" MinWidth="160">
-                    <ComboBoxItem Content="Use system setting" Tag="Default"/>
-                    <ComboBoxItem Content="Light" Tag="Light"/>
-                    <ComboBoxItem Content="Dark" Tag="Dark"/>
+                    <ComboBoxItem Content="{loc:Zh Text='Use system setting'}" Tag="Default"/>
+                    <ComboBoxItem Content="{loc:Zh Text=Light}" Tag="Light"/>
+                    <ComboBoxItem Content="{loc:Zh Text=Dark}" Tag="Dark"/>
                 </ComboBox>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Widget layout" Description="Choose the compact usage layout (bars, percentages, or both).">
+            <tk:SettingsCard Header="{loc:Zh Text='Widget layout'}" Description="选择紧凑用量视图的布局（进度条、百分比或两者同时显示）。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE71D;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="WidgetModeCombo" SelectionChanged="OnWidgetModeChanged" MinWidth="180">
-                    <ComboBoxItem Content="Bars only" Tag="BarsOnly"/>
-                    <ComboBoxItem Content="Percentages only" Tag="PercentagesOnly"/>
-                    <ComboBoxItem Content="Bars and percentages" Tag="BarsAndPercentages"/>
+                    <ComboBoxItem Content="{loc:Zh Text='Bars only'}" Tag="BarsOnly"/>
+                    <ComboBoxItem Content="{loc:Zh Text='Percentages only'}" Tag="PercentagesOnly"/>
+                    <ComboBoxItem Content="{loc:Zh Text='Bars and percentages'}" Tag="BarsAndPercentages"/>
                 </ComboBox>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Percentage display" Description="Choose whether usage percentages show consumed or remaining quota.">
+            <tk:SettingsCard Header="{loc:Zh Text='Percentage display'}" Description="选择百分比显示已用额度还是剩余额度。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE9D2;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="PercentageModeCombo" SelectionChanged="OnPercentageModeChanged" MinWidth="160">
-                    <ComboBoxItem Content="Consumed" Tag="Consumed"/>
-                    <ComboBoxItem Content="Remaining" Tag="Remaining"/>
+                    <ComboBoxItem Content="{loc:Zh Text=Consumed}" Tag="Consumed"/>
+                    <ComboBoxItem Content="{loc:Zh Text=Remaining}" Tag="Remaining"/>
                 </ComboBox>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Hide widget when no AI app is focused"
-                             Description="Fade the active provider's tile out when you switch to a browser or any other app, and bring it back when you return. Pinned providers always stay visible.">
+            <tk:SettingsCard Header="{loc:Zh Text='Hide widget when no AI app is focused'}"
+                             Description="切换到浏览器或其他应用时淡出当前服务；返回 AI 应用时恢复。已固定的服务始终保持显示。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE890;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="HideWhenUnfocusedToggle"
-                              AutomationProperties.Name="Hide widget when no AI app is focused"
+                              AutomationProperties.Name="{loc:Zh Text='Hide widget when no AI app is focused'}"
                               Toggled="OnHideWhenUnfocusedToggled"/>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Where to show usage"
-                             Description="Taskbar places the compact widget next to the tray. Floating uses a native Acrylic always-on-top window with the same layout. Scroll wheel adjusts its strength; right-click returns to the taskbar.">
+            <tk:SettingsCard Header="{loc:Zh Text='Where to show usage'}"
+                             Description="任务栏模式会将紧凑小组件放在托盘旁；悬浮模式使用相同布局的原生亚克力置顶窗口。滚轮可调节透明强度，右键可返回任务栏模式。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8A7;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="WidgetSurfaceCombo"
                           SelectionChanged="OnWidgetSurfaceChanged"
                           MinWidth="200"
-                          AutomationProperties.Name="Where to show usage"
+                          AutomationProperties.Name="{loc:Zh Text='Where to show usage'}"
                           AutomationProperties.AutomationId="WidgetSurfaceCombo">
-                    <ComboBoxItem Content="In the taskbar" Tag="Taskbar"/>
-                    <ComboBoxItem Content="Floating always-on-top window" Tag="Floating"/>
+                    <ComboBoxItem Content="{loc:Zh Text='In the taskbar'}" Tag="Taskbar"/>
+                    <ComboBoxItem Content="{loc:Zh Text='Floating always-on-top window'}" Tag="Floating"/>
                 </ComboBox>
             </tk:SettingsCard>
 
             <tk:SettingsCard x:Name="TaskbarPlacementCard"
-                             Header="Taskbar screens"
-                             Description="Show the same usage on every taskbar, choose one screen, or keep one active provider per screen. With two or more screens, Adaptive mode also lets each pinned provider target a fixed screen.">
+                             Header="{loc:Zh Text='Taskbar screens'}"
+                             Description="可在每个任务栏显示相同用量、选择一个屏幕，或让每个屏幕保留各自的活动服务。多屏时，自适应模式还允许将已固定服务指定到某个屏幕。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7F4;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="TaskbarPlacementCombo"
                           SelectionChanged="OnTaskbarPlacementChanged"
                           MinWidth="200"
-                          AutomationProperties.Name="Taskbar screens"
+                          AutomationProperties.Name="{loc:Zh Text='Taskbar screens'}"
                           AutomationProperties.AutomationId="TaskbarPlacementCombo"/>
             </tk:SettingsCard>
 
             <tk:SettingsCard x:Name="FloatingOpacityCard"
-                             Header="Floating acrylic strength"
-                             Description="How opaque the native Acrylic tint is (lower values reveal more of the blurred desktop behind it).">
+                             Header="{loc:Zh Text='Floating acrylic strength'}"
+                             Description="调节原生亚克力背景的不透明度；数值越低，后方模糊桌面越明显。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE790;"/>
                 </tk:SettingsCard.HeaderIcon>
@@ -112,7 +113,7 @@
                     <Grid x:Name="FloatingOpacitySliderHost"
                           Width="180"
                           VerticalAlignment="Center"
-                          AutomationProperties.Name="Floating acrylic strength"/>
+                          AutomationProperties.Name="{loc:Zh Text='Floating acrylic strength'}"/>
                     <TextBlock x:Name="FloatingOpacityLabel"
                                VerticalAlignment="Center"
                                MinWidth="40"
@@ -120,18 +121,18 @@
                 </StackPanel>
             </tk:SettingsCard>
 
-            <TextBlock Text="Providers" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
-            <tk:SettingsCard Header="Hide unavailable providers"
-                             Description="Automatically hide providers that are not installed or signed in. You can still add them from the dashboard or below.">
+            <TextBlock Text="{loc:Zh Text=Providers}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
+            <tk:SettingsCard Header="{loc:Zh Text='Hide unavailable providers'}"
+                             Description="自动隐藏尚未安装或登录的服务；仍可在仪表板或下方列表中重新启用。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7B8;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="AutoHideUnavailableToggle"
-                              AutomationProperties.Name="Hide unavailable providers"
+                              AutomationProperties.Name="{loc:Zh Text='Hide unavailable providers'}"
                               Toggled="OnAutoHideUnavailableToggled"/>
             </tk:SettingsCard>
 
-            <TextBlock Text="Choose which providers appear in the dashboard and usage widget."
+            <TextBlock Text="选择要显示在仪表板和用量小组件中的服务。"
                        Opacity="0.7"
                        Style="{StaticResource CaptionTextBlockStyle}"
                        TextWrapping="Wrap"
@@ -139,52 +140,52 @@
 
             <StackPanel x:Name="ProviderSettingsPanel" Spacing="4"/>
 
-            <TextBlock Text="Behavior" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
-            <tk:SettingsCard Header="Open at startup" Description="Start TaskbarQuota with Windows and show only the usage widget.">
+            <TextBlock Text="{loc:Zh Text=Behavior}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
+            <tk:SettingsCard Header="{loc:Zh Text='Open at startup'}" Description="随 Windows 启动 TaskbarQuota，并仅显示用量小组件。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7F4;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="StartupToggle"
-                              AutomationProperties.Name="Open at startup"
+                              AutomationProperties.Name="{loc:Zh Text='Open at startup'}"
                               Toggled="OnStartupToggled"/>
             </tk:SettingsCard>
 
-            <TextBlock Text="Notifications" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
-            <tk:SettingsCard Header="Quota alerts" Description="Show Windows notifications when usage crosses your configured thresholds.">
+            <TextBlock Text="{loc:Zh Text=Notifications}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
+            <tk:SettingsCard Header="{loc:Zh Text='Quota alerts'}" Description="当用量超过设定阈值时显示 Windows 通知。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xEA8F;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="QuotaAlertsToggle"
-                              AutomationProperties.Name="Enable quota alerts"
+                              AutomationProperties.Name="{loc:Zh Text='Enable quota alerts'}"
                               Toggled="OnQuotaAlertsToggled"/>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Quota replenishment"
-                             Description="Notify when available quota increases significantly or a usage window renews.">
+            <tk:SettingsCard Header="{loc:Zh Text='Quota replenishment'}"
+                             Description="当可用额度明显增加或用量周期刷新时通知。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7E7;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="QuotaReplenishmentToggle"
-                              AutomationProperties.Name="Notify when quota is replenished"
+                              AutomationProperties.Name="{loc:Zh Text='Notify when quota is replenished'}"
                               Toggled="OnQuotaReplenishmentToggled"/>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Changes since last session"
-                             Description="Notify after startup when quota increased since TaskbarQuota's last live reading. Requires quota replenishment notifications.">
+            <tk:SettingsCard Header="{loc:Zh Text='Changes since last session'}"
+                             Description="启动后，如果额度比 TaskbarQuota 上次实时读数增加则通知。需要先启用额度恢复通知。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE823;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="CrossSessionReplenishmentToggle"
-                              AutomationProperties.Name="Notify about quota increases since the last session"
+                              AutomationProperties.Name="{loc:Zh Text='Notify about quota increases since the last session'}"
                               Toggled="OnCrossSessionReplenishmentToggled"/>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Warning threshold" Description="Notify when a usage window reaches this consumed percentage.">
+            <tk:SettingsCard Header="{loc:Zh Text='Warning threshold'}" Description="当某个用量周期的已用百分比达到此值时通知。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7BA;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <NumberBox x:Name="WarningThresholdBox"
-                           AutomationProperties.Name="Warning threshold"
+                           AutomationProperties.Name="{loc:Zh Text='Warning threshold'}"
                            Minimum="1"
                            Maximum="99"
                            SmallChange="1"
@@ -194,12 +195,12 @@
                            Width="120"/>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Critical threshold" Description="Notify again when a usage window reaches this higher consumed percentage.">
+            <tk:SettingsCard Header="{loc:Zh Text='Critical threshold'}" Description="当已用百分比达到这个更高阈值时再次通知。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE814;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <NumberBox x:Name="CriticalThresholdBox"
-                           AutomationProperties.Name="Critical threshold"
+                           AutomationProperties.Name="{loc:Zh Text='Critical threshold'}"
                            Minimum="2"
                            Maximum="100"
                            SmallChange="1"
@@ -209,12 +210,12 @@
                            Width="120"/>
             </tk:SettingsCard>
 
-            <tk:SettingsCard Header="Notification cooldown" Description="Minimum minutes before TaskbarQuota repeats the same alert.">
+            <tk:SettingsCard Header="{loc:Zh Text='Notification cooldown'}" Description="TaskbarQuota 重复同一警报前的最短间隔（分钟）。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE823;"/>
                 </tk:SettingsCard.HeaderIcon>
                 <NumberBox x:Name="AlertCooldownBox"
-                           AutomationProperties.Name="Notification cooldown"
+                           AutomationProperties.Name="{loc:Zh Text='Notification cooldown'}"
                            Minimum="1"
                            Maximum="1440"
                            SmallChange="1"
@@ -224,12 +225,12 @@
                            Width="120"/>
             </tk:SettingsCard>
 
-            <TextBlock Text="Credentials" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
-            <TextBlock Text="All providers detect credentials automatically. If auto-detection fails for a provider, use the &quot;Fix&quot; button on its dashboard card."
+            <TextBlock Text="{loc:Zh Text=Credentials}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
+            <TextBlock Text="所有服务都会自动检测凭据。如果某个服务检测失败，请使用其仪表板卡片中的“修复”按钮。"
                        Opacity="0.7" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" Margin="0,0,0,4"/>
 
-            <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
-            <tk:SettingsCard Description="Native WinUI widget for AI coding-tool usage.">
+            <TextBlock Text="{loc:Zh Text=About}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
+            <tk:SettingsCard Description="{loc:Zh Text='Native WinUI widget for AI coding-tool usage.'}">
                 <tk:SettingsCard.Header>
                     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                         <Border Width="40" Height="40"

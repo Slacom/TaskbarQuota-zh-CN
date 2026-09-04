@@ -3,7 +3,8 @@
     x:Class="TaskbarQuota.Controls.ProviderUsageHistoryControl"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:vm="using:TaskbarQuota.ViewModels">
+    xmlns:vm="using:TaskbarQuota.ViewModels"
+    xmlns:loc="using:TaskbarQuota.Localization">
 
     <Border
         Padding="20,16"
@@ -14,7 +15,7 @@
         Visibility="{x:Bind BoolToVisibility(ViewModel.HasData), Mode=OneWay}">
         <StackPanel Spacing="12">
             <StackPanel Spacing="2">
-                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Usage history" />
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="{loc:Zh Text='Usage history'}" />
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
@@ -30,7 +31,7 @@
                 <TextBlock
                     VerticalAlignment="Center"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
-                    Text="Usage trend" />
+                    Text="{loc:Zh Text='Usage trend'}" />
                 <Grid Grid.Column="1">
                     <Canvas
                         x:Name="TrendCanvas"
@@ -43,7 +44,7 @@
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="No daily data"
+                        Text="{loc:Zh Text='No daily data'}"
                         Visibility="{x:Bind InvertBoolToVisibility(ViewModel.HasTrend), Mode=OneWay}" />
                 </Grid>
             </Grid>

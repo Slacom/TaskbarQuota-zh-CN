@@ -6,6 +6,7 @@
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     xmlns:vm="using:TaskbarQuota.ViewModels"
     xmlns:controls="using:TaskbarQuota.Controls"
+    xmlns:loc="using:TaskbarQuota.Localization"
     mc:Ignorable="d"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -35,7 +36,7 @@
                                   Padding="6"
                                   MinWidth="32"
                                   MinHeight="32"
-                                  ToolTipService.ToolTip="Show in usage widget"
+                                  ToolTipService.ToolTip="{loc:Zh Text='Show in usage widget'}"
                                   Click="WidgetRowVisibility_Click">
                         <FontIcon Glyph="&#xE890;" FontSize="12"/>
                     </ToggleButton>
@@ -80,7 +81,7 @@
                               Padding="6"
                               MinWidth="32"
                               MinHeight="32"
-                              ToolTipService.ToolTip="Show in usage widget"
+                              ToolTipService.ToolTip="{loc:Zh Text='Show in usage widget'}"
                               Click="WidgetRowVisibility_Click">
                     <FontIcon Glyph="&#xE890;" FontSize="12"/>
                 </ToggleButton>
@@ -135,7 +136,7 @@
                     <StackPanel Spacing="4">
                         <TextBlock Text="{x:Bind SetupTitle}" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                         <TextBlock Text="{x:Bind SetupHint}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap"/>
-                        <HyperlinkButton Content="Learn more" Tag="{x:Bind ProviderId}" Visibility="{x:Bind SetupUrlVisibility}" Click="OpenSetupUrl_Click" HorizontalAlignment="Left"/>
+                        <HyperlinkButton Content="{loc:Zh Text='Learn more'}" Tag="{x:Bind ProviderId}" Visibility="{x:Bind SetupUrlVisibility}" Click="OpenSetupUrl_Click" HorizontalAlignment="Left"/>
                     </StackPanel>
                 </Border>
 
@@ -145,10 +146,10 @@
                               Severity="Informational"
                               Message="{x:Bind Error}">
                     <muxc:InfoBar.ActionButton>
-                        <HyperlinkButton Content="Fix"
+                        <HyperlinkButton Content="{loc:Zh Text=Fix}"
                                          Tag="{x:Bind ProviderId}"
                                          Visibility="{x:Bind FixVisibility}"
-                                         AutomationProperties.Name="Fix credentials"
+                                         AutomationProperties.Name="{loc:Zh Text='Fix credentials'}"
                                          AutomationProperties.AutomationId="FixCredentialsButton"
                                          Click="FixCredentials_Click"/>
                     </muxc:InfoBar.ActionButton>
@@ -202,7 +203,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0"
-                                   Text="Quota pricing"
+                                   Text="{loc:Zh Text='Quota pricing'}"
                                    Style="{StaticResource BodyStrongTextBlockStyle}"
                                    VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="1"
@@ -244,13 +245,13 @@
                                           Padding="6"
                                           MinWidth="32"
                                           MinHeight="32"
-                                          ToolTipService.ToolTip="Show in usage widget"
+                                          ToolTipService.ToolTip="{loc:Zh Text='Show in usage widget'}"
                                           Click="WidgetRowVisibility_Click">
                                 <FontIcon Glyph="&#xE890;" FontSize="12"/>
                             </ToggleButton>
                         </Border>
                         <TextBlock Grid.Column="1" Grid.Row="0"
-                                   Text="Credits"
+                                   Text="{loc:Zh Text=Credits}"
                                    Style="{StaticResource BodyStrongTextBlockStyle}"
                                    VerticalAlignment="Center"/>
                         <ProgressBar Grid.Column="1" Grid.Row="1"
@@ -306,7 +307,7 @@
                                           Padding="6"
                                           MinWidth="32"
                                           MinHeight="32"
-                                          ToolTipService.ToolTip="Show in usage widget"
+                                          ToolTipService.ToolTip="{loc:Zh Text='Show in usage widget'}"
                                           Click="WidgetRowVisibility_Click">
                                 <FontIcon Glyph="&#xE890;" FontSize="12"/>
                             </ToggleButton>
@@ -318,7 +319,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
-                                       Text="Reset credits"
+                                       Text="{loc:Zh Text='Reset credits'}"
                                        Style="{StaticResource BodyStrongTextBlockStyle}"
                                        VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="1"
@@ -369,7 +370,7 @@
                                           Padding="6"
                                           MinWidth="32"
                                           MinHeight="32"
-                                          ToolTipService.ToolTip="Show in usage widget"
+                                          ToolTipService.ToolTip="{loc:Zh Text='Show in usage widget'}"
                                           Click="WidgetRowVisibility_Click">
                                 <FontIcon Glyph="&#xE890;" FontSize="12"/>
                             </ToggleButton>
@@ -381,7 +382,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
-                                       Text="Additional usage"
+                                       Text="{loc:Zh Text='Additional usage'}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Style="{StaticResource BodyTextBlockStyle}"
                                        VerticalAlignment="Center"/>
@@ -398,7 +399,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
-                                       Text="Spend"
+                                       Text="{loc:Zh Text=Spend}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Style="{StaticResource BodyTextBlockStyle}"
                                        VerticalAlignment="Center"/>
@@ -471,9 +472,9 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
-                            <TextBlock Text="Use AI normally"
+                            <TextBlock Text="{loc:Zh Text='Use AI normally'}"
                                        Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Open Claude or your coding apps normally. TaskbarQuota follows the active app, browser tab, or terminal."
+                            <TextBlock Text="照常打开 Claude 或其他编程应用。TaskbarQuota 会自动跟随当前应用、浏览器标签页或终端。"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Style="{StaticResource BodyTextBlockStyle}"
                                        TextWrapping="Wrap"/>
@@ -482,7 +483,7 @@
                         <Button Grid.Row="0"
                                 Grid.Column="1"
                                 AutomationProperties.AutomationId="DismissOnboardingButton"
-                                AutomationProperties.Name="Dismiss onboarding"
+                                AutomationProperties.Name="{loc:Zh Text='Dismiss onboarding'}"
                                 Click="DismissOnboarding_Click"
                                 Padding="8">
                             <FontIcon Glyph="&#xE711;" FontSize="12"/>
@@ -493,11 +494,11 @@
                                     Grid.ColumnSpan="2"
                                     Orientation="Horizontal"
                                     Spacing="8">
-                            <Button Content="Login with Claude"
+                            <Button Content="{loc:Zh Text='Login with Claude'}"
                                     Tag="Claude"
                                     AutomationProperties.AutomationId="OnboardingConnectClaudeButton"
                                     Click="OnboardingConnect_Click"/>
-                            <Button Content="Open settings"
+                            <Button Content="{loc:Zh Text='Open settings'}"
                                     AutomationProperties.AutomationId="OnboardingOpenSettingsButton"
                                     Click="OnboardingOpenSettings_Click"/>
                         </StackPanel>
@@ -543,11 +544,11 @@
                                     Orientation="Horizontal"
                                     Spacing="4">
                             <HyperlinkButton AutomationProperties.AutomationId="OpenUsageDashboardButton"
-                                             AutomationProperties.Name="Open usage dashboard"
+                                             AutomationProperties.Name="{loc:Zh Text='Open usage dashboard'}"
                                              Click="OpenUsageDashboard_Click"
                                              Padding="4,2">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Text="Usage dashboard" Style="{StaticResource BodyTextBlockStyle}"/>
+                                    <TextBlock Text="{loc:Zh Text='Usage dashboard'}" Style="{StaticResource BodyTextBlockStyle}"/>
                                     <FontIcon Glyph="&#xE8A7;" FontSize="12"/>
                                 </StackPanel>
                             </HyperlinkButton>
@@ -561,12 +562,12 @@
                                     VerticalAlignment="Center">
                             <Button x:Name="RefreshButton"
                                     AutomationProperties.AutomationId="RefreshUsageHeaderButton"
-                                    AutomationProperties.Name="Refresh usage"
+                                    AutomationProperties.Name="{loc:Zh Text='Refresh usage'}"
                                     Command="{x:Bind ViewModel.RefreshCommand}"
                                     VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon Glyph="&#xE72C;" FontSize="14"/>
-                                    <TextBlock Text="Refresh"/>
+                                    <TextBlock Text="{loc:Zh Text=Refresh}"/>
                                 </StackPanel>
                             </Button>
                             <ToggleButton x:Name="ProviderPinToggle"
@@ -578,7 +579,7 @@
                                           Tag="{x:Bind ViewModel.SelectedCard, Mode=OneWay}"
                                           VerticalAlignment="Center"
                                           MinWidth="76"
-                                          ToolTipService.ToolTip="Keep this provider in the usage widget even when another tool is active"
+                                          ToolTipService.ToolTip="{loc:Zh Text='Keep this provider in the usage widget even when another tool is active'}"
                                           Click="ProviderPinToggle_Click">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon Glyph="&#xE718;" FontSize="14"/>
@@ -599,8 +600,8 @@
                             </ToggleButton>
                             <Button x:Name="ShareProviderButton"
                                     AutomationProperties.AutomationId="ShareProviderButton"
-                                    AutomationProperties.Name="Share provider summary"
-                                    ToolTipService.ToolTip="Copy this provider summary as an image"
+                                    AutomationProperties.Name="{loc:Zh Text='Share provider summary'}"
+                                    ToolTipService.ToolTip="{loc:Zh Text='Copy this provider summary as an image'}"
                                     Click="ShareProvider_Click"
                                     VerticalAlignment="Center">
                                 <FontIcon Glyph="&#xE72D;" FontSize="14"/>
@@ -640,7 +641,7 @@
         <!-- Explains a refused pin. A tooltip on the button is no use here: the user has just clicked it
              and watched nothing happen, so the reason has to appear without being hunted for. -->
         <muxc:TeachingTip x:Name="PinBlockedTip"
-                          Title="Can't pin this provider"
+                          Title="无法固定此服务"
                           PreferredPlacement="Bottom"
                           IsLightDismissEnabled="True"/>
         <muxc:TeachingTip x:Name="ProviderShareTip"

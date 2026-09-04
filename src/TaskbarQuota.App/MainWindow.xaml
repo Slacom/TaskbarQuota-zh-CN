@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:loc="using:TaskbarQuota.Localization"
     Title="TaskbarQuota">
 
     <Grid x:Name="Root" Background="{ThemeResource LayerFillColorDefaultBrush}">
@@ -30,7 +31,7 @@
             <muxc:NavigationView.MenuItems>
                 <muxc:NavigationViewItem x:Name="CostNavigationItem"
                                          AutomationProperties.AutomationId="CostNavItem"
-                                         Content="Cost"
+                                         Content="{loc:Zh Text=Cost}"
                                          Tag="cost">
                     <muxc:NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE9D2;" />
@@ -39,7 +40,7 @@
                 <muxc:NavigationViewItemSeparator />
                 <muxc:NavigationViewItem x:Name="ProvidersNavigationItem"
                                          AutomationProperties.AutomationId="ProvidersNavItem"
-                                         Content="Providers"
+                                         Content="{loc:Zh Text=Providers}"
                                          IsExpanded="True"
                                          SelectsOnInvoked="False">
                     <muxc:NavigationViewItem.Icon>
