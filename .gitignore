@@ -15,6 +15,7 @@ ARM64/
 *.msix*
 
 # IDE / tooling
+.tools/
 .vs/
 .idea/
 *.user
