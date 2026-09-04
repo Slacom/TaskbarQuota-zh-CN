@@ -175,6 +175,29 @@ internal static partial class UiText
     public static string FormatAvailability(int count)
         => $"{count.ToString("N0", CultureInfo.CurrentCulture)} 次可用";
 
+    public static string FormatUpdatedAt(DateTime value)
+        => $"更新于 {value:HH:mm:ss}";
+
+    public static string FormatResetAt(DateTimeOffset value)
+        => $"{value:yyyy年M月d日 HH:mm} 重置";
+
+    public static string FormatTokens(long tokens)
+    {
+        if (tokens >= 1_000_000_000)
+            return $"{tokens / 1_000_000_000d:0.##}B Token";
+        if (tokens >= 1_000_000)
+            return $"{tokens / 1_000_000d:0.##}M Token";
+        if (tokens >= 1_000)
+            return $"{tokens / 1_000d:0.##}K Token";
+        return $"{tokens:N0} Token";
+    }
+
+    public static string FormatDetectedVia(string source)
+        => $"通过 {source} 检测";
+
+    public static string FormatShortVia(string source)
+        => $"经 {source}";
+
     [GeneratedRegex(@"(?<value>\d+)\s*(?<unit>[dhms])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DurationTokenRegex();
 }
