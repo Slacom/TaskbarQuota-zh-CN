@@ -4,6 +4,63 @@ namespace TaskbarQuota.Tests;
 
 public sealed class LocalizationTests
 {
+    private static readonly string[] RequiredScreenCopy =
+    [
+        "Refresh",
+        "Pinned",
+        "Pin",
+        "Widget",
+        "Ignored",
+        "Usage dashboard",
+        "Usage",
+        "Balance",
+        "Additional usage",
+        "Spend",
+        "Monthly",
+        "Model",
+        "Day",
+        "Today",
+        "Yesterday",
+        "Last 30 Days",
+        "Usage trend",
+        "Settings",
+        "Appearance",
+        "Theme",
+        "Use system setting",
+        "Light",
+        "Dark",
+        "Widget layout",
+        "Bars only",
+        "Percentages only",
+        "Bars and percentages",
+        "Percentage display",
+        "Consumed",
+        "Remaining",
+        "Where to show usage",
+        "In the taskbar",
+        "Floating always-on-top window",
+        "Providers",
+        "Behavior",
+        "Open at startup",
+        "Notifications",
+        "Quota alerts",
+        "Credentials",
+        "About",
+        "Refresh usage",
+        "Install update",
+        "No daily data",
+        "No local usage history found",
+        "Agent activity",
+        "Monitoring",
+        "Activity Widget",
+        "No recent agent activity",
+        "Cost",
+        "Open TaskbarQuota",
+        "Move usage widget",
+        "Reset widget positions",
+        "Quit",
+    ];
+
     [Theory]
     [InlineData("Session", "会话")]
     [InlineData("Weekly", "每周")]
@@ -49,5 +106,16 @@ public sealed class LocalizationTests
     public void Get_UnknownKey_ReturnsKeyInsteadOfBlankText()
     {
         Assert.Equal("UntranslatedKey", UiText.Get("UntranslatedKey"));
+    }
+
+    [Fact]
+    public void RequiredScreenCopy_HasSimplifiedChineseTranslation()
+    {
+        foreach (var key in RequiredScreenCopy)
+        {
+            var translated = UiText.Get(key);
+            Assert.NotEqual(key, translated);
+            Assert.Contains(translated, static character => character is >= '\u4e00' and <= '\u9fff');
+        }
     }
 }
