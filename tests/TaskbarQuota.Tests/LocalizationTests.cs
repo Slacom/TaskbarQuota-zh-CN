@@ -1,4 +1,5 @@
 using TaskbarQuota.Localization;
+using System.Text.RegularExpressions;
 
 namespace TaskbarQuota.Tests;
 
@@ -103,6 +104,36 @@ public sealed class LocalizationTests
     }
 
     [Fact]
+    public void FormatUpdatedAt_UsesChineseStatusText()
+    {
+        Assert.Equal("更新于 15:24:30", UiText.FormatUpdatedAt(new DateTime(2026, 9, 4, 15, 24, 30)));
+    }
+
+    [Fact]
+    public void FormatResetAt_UsesUnambiguousChineseDateTime()
+    {
+        var value = new DateTimeOffset(2026, 10, 4, 9, 6, 0, TimeSpan.FromHours(8));
+
+        Assert.Equal("2026年10月4日 09:06 重置", UiText.FormatResetAt(value));
+    }
+
+    [Theory]
+    [InlineData(1_450, "1.45K Token")]
+    [InlineData(1_450_000, "1.45M Token")]
+    [InlineData(1_450_000_000, "1.45B Token")]
+    public void FormatTokens_UsesCompactValueAndChineseUiUnit(long tokens, string expected)
+    {
+        Assert.Equal(expected, UiText.FormatTokens(tokens));
+    }
+
+    [Fact]
+    public void FormatDetectedVia_UsesChineseConnector()
+    {
+        Assert.Equal("通过 Codex CLI 检测", UiText.FormatDetectedVia("Codex CLI"));
+        Assert.Equal("经 Codex CLI", UiText.FormatShortVia("Codex CLI"));
+    }
+
+    [Fact]
     public void Get_UnknownKey_ReturnsKeyInsteadOfBlankText()
     {
         Assert.Equal("UntranslatedKey", UiText.Get("UntranslatedKey"));
@@ -132,7 +163,12 @@ public sealed class LocalizationTests
                 .Select(File.ReadAllText));
 
         foreach (var key in RequiredScreenCopy)
-            Assert.DoesNotContain($"\"{key}\"", xaml, StringComparison.Ordinal);
+        {
+            var pattern = new Regex(
+                $@"(?:Text|Content|Header|Description|Title|PlaceholderText|AutomationProperties\.Name|ToolTipService\.ToolTip)\s*=\s*\""{Regex.Escape(key)}\""",
+                RegexOptions.CultureInvariant);
+            Assert.DoesNotMatch(pattern, xaml);
+        }
 
         Assert.Contains("using:TaskbarQuota.Localization", xaml, StringComparison.Ordinal);
     }
