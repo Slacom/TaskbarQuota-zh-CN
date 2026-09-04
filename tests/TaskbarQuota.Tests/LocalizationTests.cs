@@ -118,4 +118,35 @@ public sealed class LocalizationTests
             Assert.Contains(translated, static character => character is >= '\u4e00' and <= '\u9fff');
         }
     }
+
+    [Fact]
+    public void XamlSurfaces_DoNotKeepTranslatedEnglishLiterals()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var appRoot = Path.Combine(repositoryRoot, "src", "TaskbarQuota.App");
+        var xaml = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(appRoot, "*.xaml", SearchOption.AllDirectories)
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .Select(File.ReadAllText));
+
+        foreach (var key in RequiredScreenCopy)
+            Assert.DoesNotContain($"\"{key}\"", xaml, StringComparison.Ordinal);
+
+        Assert.Contains("using:TaskbarQuota.Localization", xaml, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "TaskbarQuota.slnx")))
+                return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Could not find the TaskbarQuota repository root.");
+    }
 }
