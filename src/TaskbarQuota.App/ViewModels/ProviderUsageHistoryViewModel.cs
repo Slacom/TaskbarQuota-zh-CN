@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.ViewModels
@@ -31,8 +32,8 @@ namespace TaskbarQuota.ViewModels
 
             var peak = trendPoints.OrderByDescending(point => point.Tokens).FirstOrDefault();
             TrendAutomationName = peak is null || peak.Tokens == 0
-                ? "30-day usage trend. No daily token data."
-                : $"30-day usage trend. Peak {FormatTokens(peak.Tokens)} on {peak.Date:MMM d}.";
+                ? "最近 30 天使用趋势。暂无每日 Token 数据。"
+                : $"最近 30 天使用趋势。峰值为 {peak.Date:M月d日} 的 {FormatTokens(peak.Tokens)}。";
         }
 
         public static ProviderUsageHistoryViewModel From(UsageHistory? history)
@@ -48,9 +49,9 @@ namespace TaskbarQuota.ViewModels
 
             var periods = new[]
             {
-                new ProviderUsagePeriodRowViewModel("Today", history.Today),
-                new ProviderUsagePeriodRowViewModel("Yesterday", history.Yesterday),
-                new ProviderUsagePeriodRowViewModel("Last 30 Days", history.Last30Days),
+                new ProviderUsagePeriodRowViewModel(UiText.Get("Today"), history.Today),
+                new ProviderUsagePeriodRowViewModel(UiText.Get("Yesterday"), history.Yesterday),
+                new ProviderUsagePeriodRowViewModel(UiText.Get("Last 30 Days"), history.Last30Days),
             };
             var byDate = history.Daily
                 .Select(usage => (Usage: usage, Parsed: ParseDate(usage.Date)))
@@ -80,13 +81,7 @@ namespace TaskbarQuota.ViewModels
 
         internal static string FormatTokens(ulong tokens)
         {
-            if (tokens >= 1_000_000_000)
-                return $"{tokens / 1_000_000_000d:0.##}B tokens";
-            if (tokens >= 1_000_000)
-                return $"{tokens / 1_000_000d:0.##}M tokens";
-            if (tokens >= 1_000)
-                return $"{tokens / 1_000d:0.##}K tokens";
-            return $"{tokens:N0} tokens";
+            return UiText.FormatTokens(tokens);
         }
     }
 
@@ -103,8 +98,8 @@ namespace TaskbarQuota.ViewModels
             HasData = period is not null;
             if (period is null)
             {
-                Reading = "No data";
-                TooltipText = $"{label}: no local usage data";
+                Reading = "无数据";
+                TooltipText = $"{label}：无本地使用数据";
                 return;
             }
 
@@ -113,10 +108,10 @@ namespace TaskbarQuota.ViewModels
                 ? $"${cost:N2} · {tokens}"
                 : tokens;
             var figures = period.EstimatedCostUsd is { } exactCost
-                ? $"${exactCost:N2} · {period.Tokens:N0} tokens"
-                : $"{period.Tokens:N0} tokens · cost unavailable";
+                ? $"${exactCost:N2} · {period.Tokens:N0} Token"
+                : $"{period.Tokens:N0} Token · 成本不可用";
             TooltipText = period.CostEstimated && period.EstimatedCostUsd.HasValue
-                ? $"{figures}\nAPI-equivalent estimate; subscription billing may differ"
+                ? $"{figures}\nAPI 等值估算；可能与订阅计费不同"
                 : figures;
         }
     }
@@ -134,8 +129,8 @@ namespace TaskbarQuota.ViewModels
             Tokens = usage?.Tokens ?? 0;
             CostUsd = usage?.EstimatedCostUsd;
             TooltipText = CostUsd is { } cost
-                ? $"{Date:dddd, MMM d}: {Tokens:N0} tokens · ${cost:N2}"
-                : $"{Date:dddd, MMM d}: {Tokens:N0} tokens";
+                ? $"{Date:M月d日 dddd}：{Tokens:N0} Token · ${cost:N2}"
+                : $"{Date:M月d日 dddd}：{Tokens:N0} Token";
         }
     }
 }

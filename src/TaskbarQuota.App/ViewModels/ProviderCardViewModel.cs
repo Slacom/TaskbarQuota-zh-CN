@@ -5,6 +5,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.ViewModels
@@ -32,17 +33,17 @@ namespace TaskbarQuota.ViewModels
         public Brush PercentForeground { get; }
         public bool IsWidgetVisible { get; internal set; }
         public bool IsWidgetToggleEnabled { get; internal set; }
-        public string WidgetToggleName => $"Show {Label} in usage widget";
+        public string WidgetToggleName => $"在用量小组件中显示“{Label}”";
 
         public BarViewModel(ProviderId providerId, string widgetRowId, string label, RateWindow w)
         {
             double displayPercent = WidgetSettingsService.DisplayPercent(w.UsedPercent);
             ProviderId = providerId;
             WidgetRowId = widgetRowId;
-            Label = label;
+            Label = UiText.TranslateLabel(label);
             Percent = displayPercent;
             PercentText = WidgetSettingsService.FormatDisplayPercent(w.UsedPercent);
-            ResetText = w.ResetDescription is { } r ? $"resets in {r}" : string.Empty;
+            ResetText = w.ResetDescription is { } r ? UiText.FormatResetDescription(r) : string.Empty;
             ResetVisibility = w.ResetDescription is null ? Visibility.Collapsed : Visibility.Visible;
             BarBrush = Ui.UsageBrush(displayPercent);
             PercentForeground = BarBrush;
@@ -69,13 +70,13 @@ namespace TaskbarQuota.ViewModels
         public double MutedOpacity { get; }
         public bool IsWidgetVisible { get; internal set; }
         public bool IsWidgetToggleEnabled { get; internal set; }
-        public string WidgetToggleName => $"Show {Label} in usage widget";
+        public string WidgetToggleName => $"在用量小组件中显示“{Label}”";
 
         public TextMetricViewModel(ProviderId providerId, string widgetRowId, string label, string value, bool muted = false)
         {
             ProviderId = providerId;
             WidgetRowId = widgetRowId;
-            Label = label;
+            Label = UiText.TranslateLabel(label);
             Value = value;
             MutedOpacity = muted ? 0.55 : 1.0;
             IsWidgetVisible = WidgetSettingsService.IsRowVisible(providerId, widgetRowId);
@@ -96,13 +97,13 @@ namespace TaskbarQuota.ViewModels
         public string Label { get; }
         public bool IsWidgetVisible { get; internal set; }
         public bool IsWidgetToggleEnabled { get; internal set; }
-        public string WidgetToggleName => $"Show {Label} in usage widget";
+        public string WidgetToggleName => $"在用量小组件中显示“{Label}”";
 
         public WidgetRowToggleViewModel(ProviderId providerId, WidgetRowOption option)
         {
             ProviderId = providerId;
             WidgetRowId = option.Id;
-            Label = option.Label;
+            Label = UiText.TranslateLabel(option.Label);
             IsWidgetVisible = WidgetSettingsService.IsRowVisible(providerId, option.Id);
             IsWidgetToggleEnabled = WidgetSettingsService.IsProviderVisible(providerId);
         }
@@ -121,17 +122,17 @@ namespace TaskbarQuota.ViewModels
 
         public ResetCreditViewModel(int index, ResetCreditGrant credit)
         {
-            TokenTitle = $"Reset {index}";
+            TokenTitle = $"重置机会 {index}";
             ExpiresText = FormatNullableLocalDateTime(credit.ExpiresAt);
         }
 
         private static string FormatNullableLocalDateTime(DateTimeOffset? timestamp)
-            => timestamp is { } value ? FormatLocalDateTime(value) : "Unknown";
+            => timestamp is { } value ? FormatLocalDateTime(value) : "未知";
 
         private static string FormatLocalDateTime(DateTimeOffset timestamp)
         {
             var local = timestamp.ToLocalTime();
-            return $"{local:MMM d, yyyy h:mm tt}";
+            return $"{local:yyyy年M月d日 HH:mm}";
         }
     }
 
@@ -176,11 +177,11 @@ namespace TaskbarQuota.ViewModels
         public Visibility SourceVisibility { get; }
         public bool IsProviderWidgetVisible { get; internal set; }
         public string ProviderWidgetToggleName { get; }
-        public string ProviderWidgetToggleText => IsProviderWidgetVisible ? "Widget" : "Ignored";
+        public string ProviderWidgetToggleText => IsProviderWidgetVisible ? UiText.Get("Widget") : UiText.Get("Ignored");
         public Visibility ProviderWidgetToggleVisibility => IsSetupRequired ? Visibility.Collapsed : Visibility.Visible;
         public bool IsProviderPinned { get; internal set; }
         public string ProviderPinToggleName { get; }
-        public string ProviderPinToggleText => IsProviderPinned ? "Pinned" : "Pin";
+        public string ProviderPinToggleText => IsProviderPinned ? UiText.Get("Pinned") : UiText.Get("Pin");
         /// <summary>Pinning only makes sense for a provider the widget is allowed to draw at all.</summary>
         public bool IsProviderPinToggleEnabled => IsProviderWidgetVisible;
         public Visibility ProviderPinToggleVisibility => ProviderWidgetToggleVisibility;
@@ -240,9 +241,9 @@ namespace TaskbarQuota.ViewModels
             ActiveVisibility = isActive ? Visibility.Visible : Visibility.Collapsed;
             ProviderId = r.Id;
             IsProviderWidgetVisible = WidgetSettingsService.IsProviderVisible(r.Id);
-            ProviderWidgetToggleName = $"Show {DisplayName} in usage widget";
+            ProviderWidgetToggleName = $"在用量小组件中显示 {DisplayName}";
             IsProviderPinned = WidgetSettingsService.IsProviderPinned(r.Id);
-            ProviderPinToggleName = $"Pin {DisplayName} in the usage widget";
+            ProviderPinToggleName = $"将 {DisplayName} 固定到用量小组件";
 
             var bars = new List<BarViewModel>();
             var textMetrics = new List<TextMetricViewModel>();
@@ -295,7 +296,7 @@ namespace TaskbarQuota.ViewModels
                     if (u.ModelSpecific != null) bars.Add(new BarViewModel(r.Id, WidgetSettingsService.RowModelSpecific, "Gemini 5h", u.ModelSpecific));
                     if (u.Secondary != null) bars.Add(new BarViewModel(r.Id, WidgetSettingsService.RowSecondary, "Non-Gemini Weekly", u.Secondary));
                     if (u.Monthly != null) bars.Add(new BarViewModel(r.Id, WidgetSettingsService.RowMonthly, "Non-Gemini 5h", u.Monthly));
-                    CostText = u.Cost != null ? $"{u.Cost.Label}: {u.Cost.Display}" : string.Empty;
+                    CostText = u.Cost != null ? $"{UiText.TranslateLabel(u.Cost.Label)}：{u.Cost.Display}" : string.Empty;
                 }
                 else
                 {
@@ -324,14 +325,14 @@ namespace TaskbarQuota.ViewModels
                         {
                             var used = System.Math.Max(0, limit - remaining);
                             CreditPercent = System.Math.Clamp(used / limit * 100, 0, 100);
-                            CreditLeftText = $"{FormatCount(used)}/{FormatCount(limit)} Credits";
+                            CreditLeftText = $"{FormatCount(used)}/{FormatCount(limit)} 额度";
                         }
                         else
                         {
                             // No cap reported (e.g. Codex Business/Enterprise): show the raw balance
                             // on its own instead of a fabricated "N / N" — matches CodexBar.
                             CreditPercent = 0;
-                            CreditLeftText = $"{FormatCount(remaining)} Credits";
+                            CreditLeftText = $"{FormatCount(remaining)} 额度";
                         }
                         CreditBrush = Ui.ConsumedUsageBrush(CreditPercent);
                         CreditLimitText = FormatCreditReset(credits.ResetsAt, u.Primary.ResetDescription);
@@ -340,7 +341,7 @@ namespace TaskbarQuota.ViewModels
                     }
                     else
                     {
-                        CostText = u.Cost != null ? $"{u.Cost.Label}: {u.Cost.Display}" : string.Empty;
+                        CostText = u.Cost != null ? $"{UiText.TranslateLabel(u.Cost.Label)}：{u.Cost.Display}" : string.Empty;
                     }
 
                     if (r.Id is ProviderId.Copilot or ProviderId.Grok && u.AdditionalUsage is { } additional)
@@ -366,7 +367,7 @@ namespace TaskbarQuota.ViewModels
 
                 Plan = PlanDisplayNames.ForTitle(r.Id, r.DisplayName, u.LoginMethod);
                 Email = u.Email ?? string.Empty;
-                SourceText = r.Source.IsKnown ? r.Source.SourceText : $"via {f.SourceLabel}";
+                SourceText = r.Source.IsKnown ? r.Source.SourceText : UiText.FormatShortVia(f.SourceLabel);
                 Error = string.Empty;
             }
             else
@@ -374,7 +375,7 @@ namespace TaskbarQuota.ViewModels
                 Plan = string.Empty; Email = string.Empty; CostText = string.Empty;
                 CreditLeftText = string.Empty; CreditLimitText = string.Empty;
                 SourceText = r.Source.IsKnown ? r.Source.SourceText : string.Empty;
-                Error = r.Error ?? "Unavailable";
+                Error = r.Error ?? "不可用";
             }
             Bars = bars;
             BarsVisibility = bars.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -423,11 +424,11 @@ namespace TaskbarQuota.ViewModels
             IsOAuthLoginRequired = !ok && r.ErrorKind == ProviderErrorKind.AuthRequired
                 && r.Id is ProviderId.Claude;
             OAuthLoginVisibility = IsOAuthLoginRequired ? Visibility.Visible : Visibility.Collapsed;
-            OAuthLoginText = "Login with Claude";
+            OAuthLoginText = UiText.Get("Login with Claude");
             OAuthLoginDescription = r.Id switch
             {
-                ProviderId.Claude => "Connect Claude or sign in with Claude Code/Desktop. A browser window opens for you to approve access.",
-                _ => "Connect your account to read usage. A browser window opens for you to approve access.",
+                ProviderId.Claude => "连接 Claude，或通过 Claude Code/桌面版登录。浏览器将打开以供你授权访问。",
+                _ => "连接账户以读取用量。浏览器将打开以供你授权访问。",
             };
             ErrorVisibility = ok || IsSetupRequired || IsOAuthLoginRequired ? Visibility.Collapsed : Visibility.Visible;
             ContentVisibility = ok ? Visibility.Visible : Visibility.Collapsed;
@@ -439,7 +440,7 @@ namespace TaskbarQuota.ViewModels
 
             UsageDashboardUrl = ResolveLinkUrl(r, u => u.UsageDashboardUrl, DefaultUsageDashboardUrl);
             SetupHint = IsSetupRequired ? ProviderSetupInfo.Hint(r.Id) : string.Empty;
-            SetupTitle = "Not set up";
+            SetupTitle = "尚未设置";
             SetupUrl = IsSetupRequired ? ProviderSetupInfo.SetupUrl(r.Id) : null;
             SetupUrlVisibility = string.IsNullOrEmpty(SetupUrl) ? Visibility.Collapsed : Visibility.Visible;
             IsCompactSetupCard = IsSetupRequired;
@@ -498,14 +499,14 @@ namespace TaskbarQuota.ViewModels
             if (resetsAt is DateTimeOffset reset)
             {
                 var local = reset.ToLocalTime();
-                return $"Resets {local:MMM d 'at' h:mm tt}";
+                return UiText.FormatResetAt(local);
             }
 
-            return resetCountdown is { Length: > 0 } countdown ? $"resets in {countdown}" : string.Empty;
+            return resetCountdown is { Length: > 0 } countdown ? UiText.FormatResetDescription(countdown) : string.Empty;
         }
 
         private static string FormatAvailableResetCredits(int count)
-            => count == 1 ? "1 available" : $"{count.ToString("N0", CultureInfo.CurrentCulture)} available";
+            => UiText.FormatAvailability(count);
 
         private static string FormatResetCreditTimes(IReadOnlyList<ResetCreditGrant> credits, Func<ResetCreditGrant, DateTimeOffset?> selector)
         {
@@ -524,21 +525,21 @@ namespace TaskbarQuota.ViewModels
             if (values.Count == 0)
                 return "—";
             if (datedCount > values.Count)
-                values.Add($"+{datedCount - values.Count} more");
-            return string.Join("; ", values);
+                values.Add($"另有 {datedCount - values.Count} 次");
+            return string.Join("；", values);
         }
 
         private static string FormatLocalDateTime(DateTimeOffset timestamp)
         {
             var local = timestamp.ToLocalTime();
-            return $"{local:MMM d h:mm tt}";
+            return $"{local:M月d日 HH:mm}";
         }
 
         private static string ModelSpecificLabel(ProviderId id) => id switch
         {
-            ProviderId.Cursor => "API Usage",
-            ProviderId.Copilot => "Completions",
-            _ => "Model",
+            ProviderId.Cursor => "API 用量",
+            ProviderId.Copilot => "代码补全",
+            _ => UiText.Get("Model"),
         };
 
         internal static bool ShouldShowModelBreakdown(ProviderId providerId, int modelCount)

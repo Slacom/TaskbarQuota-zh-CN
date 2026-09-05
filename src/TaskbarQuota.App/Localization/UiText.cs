@@ -192,6 +192,17 @@ internal static partial class UiText
         return $"{tokens:N0} Token";
     }
 
+    public static string FormatTokens(ulong tokens)
+    {
+        if (tokens >= 1_000_000_000)
+            return $"{tokens / 1_000_000_000d:0.##}B Token";
+        if (tokens >= 1_000_000)
+            return $"{tokens / 1_000_000d:0.##}M Token";
+        if (tokens >= 1_000)
+            return $"{tokens / 1_000d:0.##}K Token";
+        return $"{tokens:N0} Token";
+    }
+
     public static string FormatDetectedVia(string source)
         => $"通过 {source} 检测";
 

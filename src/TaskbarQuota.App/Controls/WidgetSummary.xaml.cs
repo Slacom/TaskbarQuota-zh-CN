@@ -12,6 +12,7 @@ using Windows.Foundation;
 using Windows.UI;
 using TaskbarQuota.ActiveApp;
 using TaskbarQuota.AgentActivity;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Services;
 using TaskbarQuota.Usage;
 using TaskbarQuota.Usage.Providers;
@@ -270,7 +271,7 @@ namespace TaskbarQuota.Controls
                 };
                 RenderRows();
                 AnimateRender(isFirstReveal, providerSwitch: providerChanged);
-                ToolTipService.SetToolTip(this, $"{widgetName}: {result.Error ?? "Loading..."}");
+                ToolTipService.SetToolTip(this, $"{widgetName}：{result.Error ?? "正在加载…"}");
                 return;
             }
 
@@ -279,11 +280,11 @@ namespace TaskbarQuota.Controls
                 // Claude needs an interactive OAuth login — say so instead of a red blank bar.
                 if (result.Id is ProviderId.Claude && result.ErrorKind == ProviderErrorKind.AuthRequired)
                 {
-                    _rows = new() { new WidgetUsageRow("Login", 0, "required", HasBar: false) };
+                    _rows = new() { new WidgetUsageRow("登录", 0, "需要", HasBar: false) };
                     RenderRows();
                     AnimateRender(isFirstReveal, providerSwitch: providerChanged);
                     var loginSourceText = result.Source.IsKnown ? $" {result.Source.ShortViaText}" : "";
-                    ToolTipService.SetToolTip(this, $"{widgetName}{loginSourceText}: Login required — open the app to connect.");
+                    ToolTipService.SetToolTip(this, $"{widgetName}{loginSourceText}：需要登录，请打开应用完成连接。");
                     return;
                 }
 
@@ -293,12 +294,12 @@ namespace TaskbarQuota.Controls
                     && result.ErrorKind == ProviderErrorKind.AuthRequired)
                 {
                     bool isGo = result.Id == ProviderId.OpenCodeGo;
-                    _rows = new() { new WidgetUsageRow(isGo ? "API key" : "Cookies", 0, "needed", HasBar: false) };
+                    _rows = new() { new WidgetUsageRow(isGo ? "API 密钥" : "Cookie", 0, "需要", HasBar: false) };
                     RenderRows();
                     AnimateRender(isFirstReveal, providerSwitch: providerChanged);
                     var opencodeSourceText = result.Source.IsKnown ? $" {result.Source.ShortViaText}" : "";
                     ToolTipService.SetToolTip(this,
-                        $"{widgetName}{opencodeSourceText}: {result.Error ?? (isGo ? "OpenCode Go API key not found." : "No cookies detected. Manual cookie insertion is needed.")}");
+                        $"{widgetName}{opencodeSourceText}：{result.Error ?? (isGo ? "未找到 OpenCode Go API 密钥。" : "未检测到 Cookie，需要手动填写。")}");
                     return;
                 }
 
@@ -310,7 +311,7 @@ namespace TaskbarQuota.Controls
                 RenderRows();
                 AnimateRender(isFirstReveal, providerSwitch: providerChanged);
                 var sourceText = result.Source.IsKnown ? $" {result.Source.ShortViaText}" : "";
-                ToolTipService.SetToolTip(this, $"{widgetName}{sourceText}: {result.Error ?? "Unavailable"}");
+                ToolTipService.SetToolTip(this, $"{widgetName}{sourceText}：{result.Error ?? "不可用"}");
                 return;
             }
 
@@ -736,8 +737,8 @@ namespace TaskbarQuota.Controls
 
             ToolTipService.SetToolTip(this,
                 $"{WidgetTooltipTitle(result.DisplayName, result.Source)} · {usage.LoginMethod}\n" +
-                $"Usage: {usage.Cost?.Display ?? "--"}\n" +
-                $"Balance: {(balanceText != null ? "$" + balanceText.Split(' ')[0] : "--")}" +
+                $"用量：{usage.Cost?.Display ?? "--"}\n" +
+                $"余额：{(balanceText != null ? "$" + balanceText.Split(' ')[0] : "--")}" +
                 WidgetUsageHistoryTooltipLine(usage.UsageHistory) +
                 StaleTooltipLine(result));
         }
@@ -760,7 +761,7 @@ namespace TaskbarQuota.Controls
 
             ToolTipService.SetToolTip(this,
                 $"{WidgetTooltipTitle(result.DisplayName, result.Source)} · {usage.LoginMethod}\n" +
-                $"Credit balance: {usage.Cost?.Display ?? "--"}" +
+                $"额度余额：{usage.Cost?.Display ?? "--"}" +
                 WidgetUsageHistoryTooltipLine(usage.UsageHistory) +
                 StaleTooltipLine(result));
         }
@@ -813,12 +814,12 @@ namespace TaskbarQuota.Controls
 
             var plan = FormatPlanLabel(result.Id, widgetName, usage.LoginMethod);
             var tooltip = string.IsNullOrEmpty(plan)
-                ? $"{WidgetTooltipTitle(widgetName, result.Source)}\nCredits: {value} ({FormatCreditCount(remaining)} remaining)"
-                : $"{WidgetTooltipTitle(widgetName, result.Source)} · {plan}\nCredits: {value} ({FormatCreditCount(remaining)} remaining)";
+                ? $"{WidgetTooltipTitle(widgetName, result.Source)}\n额度：{value}（剩余 {FormatCreditCount(remaining)}）"
+                : $"{WidgetTooltipTitle(widgetName, result.Source)} · {plan}\n额度：{value}（剩余 {FormatCreditCount(remaining)}）";
             if (usage.AdditionalUsage is { Enabled: true } addl)
-                tooltip += $"\nAdditional usage: {addl.StatusText} ({addl.SpendText})";
+                tooltip += $"\n额外用量：{addl.StatusText}（{addl.SpendText}）";
             if (usage.Primary.ResetDescription is { } resetDesc)
-                tooltip += $"\nresets in {resetDesc}";
+                tooltip += $"\n{UiText.FormatResetDescription(resetDesc)}";
             if (usage.Pricing is { } pricingState)
                 tooltip += $"\n{pricingState.Display}";
             tooltip += WidgetUsageHistoryTooltipLine(usage.UsageHistory);
@@ -868,10 +869,10 @@ namespace TaskbarQuota.Controls
                 if (cost.Amount <= 0)
                     return string.Empty;
 
-                return $"\nCredits: {FormatCreditCount(cost.Amount)} remaining";
+                return $"\n额度：剩余 {FormatCreditCount(cost.Amount)}";
             }
 
-            return $"\n{cost.Label}: {cost.Display}";
+            return $"\n{UiText.TranslateLabel(cost.Label)}：{cost.Display}";
         }
 
         internal static string WidgetUsageHistoryTooltipLine(UsageHistory? history)
@@ -881,18 +882,15 @@ namespace TaskbarQuota.Controls
 
             var tokens = FormatHistoryTokens(today.Tokens);
             if (today.EstimatedCostUsd is not { } cost)
-                return $"\nToday: {tokens} · cost unavailable";
+                return $"\n今天：{tokens} · 成本不可用";
 
             var estimateMarker = today.EstimateComplete ? string.Empty : "*";
-            return $"\nToday: ${cost:F2}{estimateMarker} estimated · {tokens}";
+            return $"\n今天：估算 ${cost:F2}{estimateMarker} · {tokens}";
         }
 
         private static string FormatHistoryTokens(ulong tokens)
         {
-            if (tokens >= 1_000_000_000) return $"{tokens / 1_000_000_000d:0.#}B tokens";
-            if (tokens >= 1_000_000) return $"{tokens / 1_000_000d:0.#}M tokens";
-            if (tokens >= 1_000) return $"{tokens / 1_000d:0.#}K tokens";
-            return $"{tokens:N0} tokens";
+            return UiText.FormatTokens(tokens);
         }
 
         private static string WidgetResetCreditsTooltipLine(ResetCreditsSnapshot? resetCredits)
@@ -902,7 +900,7 @@ namespace TaskbarQuota.Controls
 
             var lines = new List<string>
             {
-                $"Reset credits: {resetCredits.AvailableCount.ToString("N0", CultureInfo.InvariantCulture)} available",
+                $"重置机会：{UiText.FormatAvailability(resetCredits.AvailableCount)}",
             };
 
             int shown = 0;
@@ -911,12 +909,12 @@ namespace TaskbarQuota.Controls
                 var credit = resetCredits.Credits[i];
                 string granted = FormatLocalDateTime(credit.GrantedAt);
                 string expires = FormatLocalDateTime(credit.ExpiresAt);
-                lines.Add($"Reset {shown + 1}: granted {granted}, expires {expires}");
+                lines.Add($"重置机会 {shown + 1}：发放于 {granted}，到期于 {expires}");
                 shown++;
             }
 
             if (resetCredits.Credits.Count > shown)
-                lines.Add($"+{resetCredits.Credits.Count - shown} more reset credits");
+                lines.Add($"另有 {resetCredits.Credits.Count - shown} 次重置机会");
 
             return "\n" + string.Join("\n", lines);
         }
@@ -964,10 +962,10 @@ namespace TaskbarQuota.Controls
             // the false branch only — inlining these dropped the whole body whenever plan was empty.
             var header = string.IsNullOrEmpty(plan) ? $"{title}\n" : $"{title} · {plan}\n";
             var body =
-                $"Gemini: {WidgetSettingsService.FormatDisplayPercent(usage.Primary.UsedPercent)}" +
-                (usage.Primary.ResetDescription is { } r1 ? $" (resets {r1})" : "") + "\n" +
-                $"Non-Gemini: {WidgetSettingsService.FormatDisplayPercent(usage.Secondary?.UsedPercent ?? 0)}" +
-                (usage.Secondary?.ResetDescription is { } r2 ? $" (resets {r2})" : "");
+                $"Gemini：{WidgetSettingsService.FormatDisplayPercent(usage.Primary.UsedPercent)}" +
+                (usage.Primary.ResetDescription is { } r1 ? $"（{UiText.FormatResetDescription(r1)}）" : "") + "\n" +
+                $"非 Gemini：{WidgetSettingsService.FormatDisplayPercent(usage.Secondary?.UsedPercent ?? 0)}" +
+                (usage.Secondary?.ResetDescription is { } r2 ? $"（{UiText.FormatResetDescription(r2)}）" : "");
             ToolTipService.SetToolTip(
                 this,
                 header + body + WidgetUsageHistoryTooltipLine(usage.UsageHistory) + StaleTooltipLine(result));
@@ -1587,7 +1585,7 @@ namespace TaskbarQuota.Controls
         /// <summary>Names the age of a snapshot restored from the previous session; empty when live.</summary>
         private static string StaleTooltipLine(UsageResult result)
             => result.IsStale && result.Fetch is { } fetch
-                ? $"\nLast updated {fetch.FetchedAt.ToLocalTime():t} — refreshing…"
+                ? $"\n上次更新于 {fetch.FetchedAt.ToLocalTime():HH:mm}，正在刷新…"
                 : string.Empty;
 
         private static string BuildRenderSignature(UsageResult result)
@@ -1660,24 +1658,24 @@ namespace TaskbarQuota.Controls
         private static string FormatTooltipLine(WidgetUsageRow row)
         {
             if (string.IsNullOrWhiteSpace(row.ResetDescription))
-                return $"{row.Label}: {row.Value}";
+                return $"{DisplayLabel(row.Label)}：{row.Value}";
 
             if (row.Label == "Resets")
             {
                 string expiry = row.ResetDescription == "now"
-                    ? "oldest expires now"
-                    : $"oldest expires in {row.ResetDescription}";
-                return $"{row.Label}: {row.Value} - {expiry}";
+                    ? "最早的一次即将到期"
+                    : $"最早的一次将在 {UiText.FormatDuration(row.ResetDescription)}后到期";
+                return $"{DisplayLabel(row.Label)}：{row.Value} - {expiry}";
             }
 
             string reset = row.ResetDescription == "now"
-                ? "resets now"
-                : $"resets in {row.ResetDescription}";
-            return $"{row.Label}: {row.Value} - {reset}";
+                ? "即将重置"
+                : UiText.FormatResetDescription(row.ResetDescription);
+            return $"{DisplayLabel(row.Label)}：{row.Value} - {reset}";
         }
 
         private static string BaseLabelText(WidgetUsageRow row, WidgetDisplayMode mode)
-            => mode == WidgetDisplayMode.PercentagesOnly ? row.Label + ":" : row.Label;
+            => mode == WidgetDisplayMode.PercentagesOnly ? DisplayLabel(row.Label) + "：" : DisplayLabel(row.Label);
 
         private static double MeasureTextWidth(string text, int fontSize = WidgetFontSize)
         {
@@ -1693,15 +1691,15 @@ namespace TaskbarQuota.Controls
         }
 
         private static string CompactResetDescription(string resetDescription)
-            => resetDescription == "now" ? "now" : resetDescription.Replace(" ", "", StringComparison.Ordinal);
+            => UiText.FormatDuration(resetDescription);
 
         private static string FormatLocalDateTime(DateTimeOffset? timestamp)
         {
             if (timestamp is not DateTimeOffset value)
-                return "unknown";
+                return "未知";
 
             var local = value.ToLocalTime();
-            return $"{local:MMM d h:mm tt}";
+            return $"{local:M月d日 HH:mm}";
         }
 
         private Brush ResetBrush(string resetDescription)
@@ -1772,9 +1770,9 @@ namespace TaskbarQuota.Controls
 
         private static string ModelSpecificLabel(ProviderId id) => id switch
         {
-            ProviderId.Cursor => "API Usage",
-            ProviderId.Copilot => "Completions",
-            _ => "Model",
+            ProviderId.Cursor => "API 用量",
+            ProviderId.Copilot => "代码补全",
+            _ => UiText.Get("Model"),
         };
 
         private static string CompactLabel(string label)
@@ -1782,11 +1780,17 @@ namespace TaskbarQuota.Controls
             label = label.Trim();
             return label switch
             {
-                "Total usage" => "Total",
-                "Auto + Composer Usage" => "Auto+Composer",
+                "Total usage" => "总计",
+                "Auto + Composer Usage" => "自动+编写",
                 "API Usage" => "API",
-                "Session" => "Session",
-                "Spark Session" => "Spark Session",
+                "Session" => UiText.Get("Session"),
+                "Weekly" => UiText.Get("Weekly"),
+                "Monthly" => UiText.Get("Monthly"),
+                "Usage" => UiText.Get("Usage"),
+                "Balance" => UiText.Get("Balance"),
+                "Credits" => UiText.Get("Credits"),
+                "Resets" => "重置",
+                "Spark Session" => "Spark 会话",
                 _ when label.Contains("claude", StringComparison.OrdinalIgnoreCase) => "Claude",
                 _ when label.Contains("gemini", StringComparison.OrdinalIgnoreCase) && label.Contains("flash", StringComparison.OrdinalIgnoreCase) => "Gemini Flash",
                 _ when label.Contains("gemini", StringComparison.OrdinalIgnoreCase) && label.Contains("pro", StringComparison.OrdinalIgnoreCase) => "Gemini Pro",
@@ -1794,6 +1798,9 @@ namespace TaskbarQuota.Controls
                 _ => label.Length > 12 ? label[..12] : label,
             };
         }
+
+        private static string DisplayLabel(string label)
+            => CompactLabel(UiText.TranslateLabel(label));
 
         public void RaiseDisplayMode(DisplayMode mode) => DisplayModeChanged?.Invoke(mode);
 

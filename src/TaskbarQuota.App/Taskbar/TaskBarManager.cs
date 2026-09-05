@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
 using TaskbarQuota.Diagnostics;
 using TaskbarQuota.Interop;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 using TaskbarQuota.AgentActivity;
 
@@ -297,12 +298,12 @@ namespace TaskbarQuota.Taskbar
 
         private static void CreateTrayIcon()
         {
-            var open = new PopupMenuItem("Open TaskbarQuota", (_, _) => _dispatcher?.TryEnqueue(() => _showMainWindow?.Invoke()));
-            var activity = new PopupMenuItem("Open agent activity", (_, _) => _dispatcher?.TryEnqueue(
+            var open = new PopupMenuItem(UiText.Get("Open TaskbarQuota"), (_, _) => _dispatcher?.TryEnqueue(() => _showMainWindow?.Invoke()));
+            var activity = new PopupMenuItem(UiText.Get("Open agent activity"), (_, _) => _dispatcher?.TryEnqueue(
                 () => ToggleActivityFlyout(anchorHandle: null, selectedActivityId: null)));
-            var move = new PopupMenuItem("Move usage widget", (_, _) => _dispatcher?.TryEnqueue(StartMoveActiveSurface));
-            var reset = new PopupMenuItem("Reset widget positions", (_, _) => _dispatcher?.TryEnqueue(ResetActiveSurfacePositions));
-            var quit = new PopupMenuItem("Quit", (_, _) => _dispatcher?.TryEnqueue(App.Quit));
+            var move = new PopupMenuItem(UiText.Get("Move usage widget"), (_, _) => _dispatcher?.TryEnqueue(StartMoveActiveSurface));
+            var reset = new PopupMenuItem(UiText.Get("Reset widget positions"), (_, _) => _dispatcher?.TryEnqueue(ResetActiveSurfacePositions));
+            var quit = new PopupMenuItem(UiText.Get("Quit"), (_, _) => _dispatcher?.TryEnqueue(App.Quit));
 
             System.Drawing.Icon? icon = null;
             try

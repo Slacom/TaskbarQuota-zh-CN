@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.ViewModels
@@ -112,7 +113,7 @@ namespace TaskbarQuota.ViewModels
         {
             if (IsRefreshing) return;
             IsRefreshing = true;
-            StatusText = "Refreshing...";
+            StatusText = "正在刷新…";
             try
             {
                 await LoadProgressiveAsync(force: true);
@@ -161,7 +162,7 @@ namespace TaskbarQuota.ViewModels
                 if (!ReferenceEquals(_loadCts, cts))
                     return;
                 UpdateCards(results, active);
-                StatusText = force ? "Refreshing..." : "Loading...";
+                StatusText = force ? "正在刷新…" : "正在加载…";
             });
 
             try
@@ -213,7 +214,7 @@ namespace TaskbarQuota.ViewModels
                             refreshUsageSnapshot: true,
                             usageResults: completed.UsageResults);
                         TotalSpend.IsLoading = false;
-                        StatusText = $"Updated at {DateTime.Now:HH:mm:ss}";
+                        StatusText = UiText.FormatUpdatedAt(DateTime.Now);
                     });
                 }
             }
@@ -425,7 +426,7 @@ namespace TaskbarQuota.ViewModels
                 if (ProviderDiscoveryService.ShouldFetch(provider.Id, active))
                 {
                     merged[provider.Id] = UsageResult.Pending(provider.Id, provider,
-                        active == provider.Id ? "Loading active provider..." : "Loading...");
+                        active == provider.Id ? "正在加载当前服务…" : "正在加载…");
                     continue;
                 }
 
@@ -452,7 +453,7 @@ namespace TaskbarQuota.ViewModels
                 combined[provider.Id] = UsageResult.Success(
                     provider.Id,
                     provider,
-                    new ProviderFetchResult(usage, "Local usage history"));
+                    new ProviderFetchResult(usage, "本地使用记录"));
             }
             return combined.Values.OrderBy(result => result.Id).ToArray();
         }

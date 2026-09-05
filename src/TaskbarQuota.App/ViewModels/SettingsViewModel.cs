@@ -110,12 +110,12 @@ namespace TaskbarQuota.ViewModels
             foreach (var provider in UsageCoordinator.Instance.Service.All)
             {
                 string status = ProviderDiscoveryService.IsConfigured(provider.Id)
-                    ? "Configured"
+                    ? "已配置"
                     : ProviderDiscoveryService.IsProbed(provider.Id)
                         ? ProviderInstallDetector.IsInstalled(provider.Id)
-                            ? "Waiting for app"
-                            : "Not set up"
-                        : "Unknown";
+                            ? "等待应用"
+                            : "尚未设置"
+                        : "未知";
 
                 Providers.Add(new ProviderSettingItemViewModel(
                     provider.Id,
