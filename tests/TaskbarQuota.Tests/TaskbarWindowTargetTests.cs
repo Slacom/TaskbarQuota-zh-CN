@@ -7,6 +7,9 @@ namespace TaskbarQuota.Tests;
 
 public class TaskbarWindowTargetTests
 {
+    private const string MonitorA = @"\\?\DISPLAY#GENERIC#5&abc&0&UID100#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
+    private const string MonitorB = @"\\?\DISPLAY#GENERIC#5&abc&0&UID101#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
+
     [Theory]
     [InlineData(TaskbarWindowTarget.PrimaryClassName, true)]
     [InlineData(TaskbarWindowTarget.SecondaryClassName, false)]
@@ -35,14 +38,20 @@ public class TaskbarWindowTargetTests
     }
 
     [Fact]
-    public void BuildDisplayKey_PrefersStableMonitorIdOverGdiName()
+    public void BuildDisplayKey_uses_case_insensitive_monitor_interface_independent_of_gdi_name()
     {
         var displayKey = TaskbarWindowTarget.BuildDisplayKey(
             @"\\.\DISPLAY7",
-            @"MONITOR\DELA0D5\{4d36e96e-e325-11ce-bfc1-08002be10318}\0004",
+            MonitorA,
             new RECT { left = 2560, top = 0, right = 4480, bottom = 1080 });
 
-        Assert.Equal("MONITORDELA0D54d36e96e-e325-11ce-bfc1-08002be103180004", displayKey);
+        Assert.StartsWith("MONITOR_", displayKey);
+        Assert.Equal(72, displayKey.Length);
+        Assert.Equal(displayKey, TaskbarWindowTarget.BuildDisplayKey("DISPLAY2", MonitorA.ToLowerInvariant(), default));
+        Assert.NotEqual(displayKey, TaskbarWindowTarget.BuildDisplayKey("DISPLAY7", MonitorB, default));
+        Assert.NotEqual(
+            TaskbarWindowTarget.BuildDisplayKey("DISPLAY7", "a#bc", default),
+            TaskbarWindowTarget.BuildDisplayKey("DISPLAY7", "ab#c", default));
     }
 
     [Fact]
@@ -137,14 +146,65 @@ public class TaskbarWindowTargetTests
     }
 
     [Fact]
-    public void DisambiguateDisplayKeys_suffixes_identical_monitor_ids()
+    public void Canonical_targets_use_distinct_monitor_instances_and_drop_ambiguous_legacy_aliases()
     {
-        var left = Target(1, true, "GENERIC", "DISPLAY1", monitor: 1, left: 0);
-        var right = Target(2, false, "GENERIC", "DISPLAY2", monitor: 2, left: 1920);
+        var left = InstanceTarget(1, true, MonitorA, "DISPLAY1", 1, 0);
+        var right = InstanceTarget(2, false, MonitorB, "DISPLAY2", 2, 1920);
 
-        var unique = TaskbarWindowTarget.DisambiguateDisplayKeys([left, right]);
+        var unique = TaskbarWindowTarget.SelectCanonicalTaskbars([left, right]);
 
-        Assert.Equal(["GENERIC_DISPLAY1", "GENERIC_DISPLAY2"], unique.Select(target => target.DisplayKey));
+        Assert.NotEqual(unique[0].DisplayKey, unique[1].DisplayKey);
+        Assert.All(unique, target => Assert.Empty(target.LegacyDisplayKey));
+        var identities = unique.Select(target => target.ToIdentity()).ToArray();
+        Assert.False(TaskbarWindowTarget.TryMigratePersistedKey("GENERIC", identities, out _));
+        Assert.True(TaskbarWindowTarget.TryMigratePersistedKey("GENERIC_DISPLAY2", identities, out string migrated));
+        Assert.Equal(right.DisplayKey, migrated);
+    }
+
+    [Fact]
+    public void Selected_and_pinned_duplicate_monitor_survives_disconnect_reconnect_and_gdi_renumbering()
+    {
+        var primary = Target(3, true, "PRIMARY", "DISPLAY3", 30, -1920);
+        var left = InstanceTarget(1, false, MonitorA, "DISPLAY1", 10, 0);
+        var right = InstanceTarget(2, false, MonitorB, "DISPLAY2", 20, 1920);
+        var initial = TaskbarWindowTarget.SelectCanonicalTaskbars([primary, left, right]);
+        string saved = initial.Single(target => target.Monitor == left.Monitor).DisplayKey;
+
+        IReadOnlyList<TaskbarWindowTarget>[] snapshots = [
+            TaskbarWindowTarget.SelectCanonicalTaskbars([primary, left]),
+            TaskbarWindowTarget.SelectCanonicalTaskbars([primary, right]),
+            TaskbarWindowTarget.SelectCanonicalTaskbars([right, primary, left]),
+            TaskbarWindowTarget.SelectCanonicalTaskbars([
+                primary,
+                InstanceTarget(11, false, MonitorA, "DISPLAY6", 100, 2560),
+                InstanceTarget(12, false, MonitorB, "DISPLAY7", 200, -1920),
+            ]),
+        ];
+        foreach (var targets in snapshots)
+        {
+            var identities = targets.Select(target => target.ToIdentity()).ToArray();
+            Assert.Equal(saved, TaskbarWindowTarget.ResolvePersistedDisplayKey(saved, identities));
+            Assert.False(TaskbarWindowTarget.TryMigratePersistedKey(saved, identities, out _));
+            var available = targets.Select(target => target.DisplayKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var mode in new[] { TaskbarPlacementMode.SelectedDisplay, TaskbarPlacementMode.Adaptive })
+            {
+                foreach (var target in targets)
+                {
+                    bool routed = TaskbarContentRouter.IsRoutedToDisplay(
+                        ProviderId.Codex, mode, saved, target.DisplayKey, primary.DisplayKey, available,
+                        _ => null, _ => true, _ => saved);
+                    Assert.Equal(target.DisplayKey == (available.Contains(saved) ? saved : primary.DisplayKey), routed);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void Unambiguous_monitor_id_from_earlier_pr_build_migrates_to_interface_key()
+    {
+        var target = InstanceTarget(1, true, MonitorA, "DISPLAY6", 10, 0);
+        Assert.True(TaskbarWindowTarget.TryMigratePersistedKey("GENERIC", [target.ToIdentity()], out string migrated));
+        Assert.Equal(target.DisplayKey, migrated);
     }
 
     [Fact]
@@ -204,14 +264,14 @@ public class TaskbarWindowTargetTests
     public void Window_monitor_uses_canonical_key_for_adaptive_history_with_duplicate_ids()
     {
         var targets = TaskbarWindowTarget.SelectCanonicalTaskbars([
-            Target(1, true, "GENERIC", "DISPLAY1", 10, 0),
-            Target(2, false, "GENERIC", "DISPLAY2", 20, 1920),
+            InstanceTarget(1, true, MonitorA, "DISPLAY1", 10, 0),
+            InstanceTarget(2, false, MonitorB, "DISPLAY2", 20, 1920),
         ]);
         string windowKey = TaskbarWindowTarget.GetDisplayKeyForMonitor(new IntPtr(20), targets);
         var history = new AdaptiveDisplayProviderState();
         history.Observe(ProviderId.Codex, windowKey, new IntPtr(100));
 
-        Assert.Equal("GENERIC_DISPLAY2", windowKey);
+        Assert.Equal(TaskbarWindowTarget.BuildDisplayKey("DISPLAY2", MonitorB, default), windowKey);
         Assert.Equal(ProviderId.Codex, history.GetProvider(targets[1].DisplayKey));
         Assert.Null(history.GetProvider(targets[0].DisplayKey));
         Assert.Equal(string.Empty, TaskbarWindowTarget.GetDisplayKeyForMonitor(IntPtr.Zero, targets));
@@ -318,6 +378,45 @@ public class TaskbarWindowTargetTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData("GENERIC")]
+    [InlineData("GENERIC_DISPLAY2")]
+    public void Interface_key_migration_preserves_earlier_pr_layout_and_subsequent_reset(string oldKey)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "taskbarquota-interface-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var target = InstanceTarget(2, false, MonitorB, "DISPLAY2", 20, 1920);
+            string oldPath = Path.Combine(directory, TaskbarWindowTarget.BuildPositionFileName(oldKey));
+            string gdiPath = Path.Combine(directory, TaskbarWindowTarget.BuildPositionFileName("DISPLAY2"));
+            File.WriteAllText(oldPath, "456");
+            File.WriteAllText(oldPath + ".migrated", "1");
+            File.WriteAllText(gdiPath, "123");
+
+            string currentPath = target.GetPositionPath(directory);
+            Assert.Equal("456", File.ReadAllText(currentPath));
+            Assert.Equal(currentPath, (target with { GdiDeviceName = "DISPLAY7" }).GetPositionPath(directory));
+
+            // Simulate a layout reset before installing this revision: only the old migration receipt remains.
+            File.Delete(oldPath);
+            File.Delete(currentPath);
+            File.Delete(currentPath + ".migrated");
+            target.GetPositionPath(directory);
+            Assert.False(File.Exists(currentPath));
+            Assert.True(File.Exists(currentPath + ".migrated"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static TaskbarWindowTarget InstanceTarget(
+        int handle, bool primary, string instance, string gdi, int monitor, int left)
+        => Target(handle, primary, TaskbarWindowTarget.BuildDisplayKey(gdi, instance, default), gdi, monitor, left)
+            with { LegacyDisplayKey = "GENERIC", LegacySuffixedDisplayKey = $"GENERIC_{gdi}" };
 
     private static TaskbarWindowTarget Target(
         int handle,

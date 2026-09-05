@@ -4,13 +4,16 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using TaskbarQuota.Diagnostics;
 using TaskbarQuota.Interop;
 
 namespace TaskbarQuota.Taskbar
 {
-    internal readonly record struct DisplayIdentity(string DisplayKey, string GdiDeviceName, bool IsPrimary);
+    internal readonly record struct DisplayIdentity(
+        string DisplayKey, string GdiDeviceName, bool IsPrimary,
+        string LegacyDisplayKey = "", string LegacySuffixedDisplayKey = "");
 
     internal readonly record struct TaskbarWindowTarget(
         IntPtr Handle,
@@ -18,7 +21,9 @@ namespace TaskbarQuota.Taskbar
         string DisplayKey,
         string GdiDeviceName = "",
         IntPtr Monitor = default,
-        RECT Bounds = default)
+        RECT Bounds = default,
+        string LegacyDisplayKey = "",
+        string LegacySuffixedDisplayKey = "")
     {
         internal const string PrimaryClassName = "Shell_TrayWnd";
         internal const string SecondaryClassName = "Shell_SecondaryTrayWnd";
@@ -32,7 +37,8 @@ namespace TaskbarQuota.Taskbar
             }
         }
 
-        public DisplayIdentity ToIdentity() => new(DisplayKey, GdiDeviceName, IsPrimary);
+        public DisplayIdentity ToIdentity()
+            => new(DisplayKey, GdiDeviceName, IsPrimary, LegacyDisplayKey, LegacySuffixedDisplayKey);
 
         public static bool TryFindAll(out IReadOnlyList<TaskbarWindowTarget> result)
         {
@@ -61,6 +67,13 @@ namespace TaskbarQuota.Taskbar
         internal string GetPositionPath(string directory)
         {
             string path = Path.Combine(directory, BuildPositionFileName(DisplayKey));
+
+            // Prefer layouts saved by earlier PR builds over the original GDI-keyed layout.
+            foreach (string legacyKey in new[] { LegacySuffixedDisplayKey, LegacyDisplayKey })
+            {
+                if (legacyKey.Length > 0 && !string.Equals(legacyKey, DisplayKey, StringComparison.OrdinalIgnoreCase))
+                    MigratePositionFiles(Path.Combine(directory, BuildPositionFileName(legacyKey)), path);
+            }
 
             string gdiKey = SanitizeDisplayToken(GdiDeviceName);
             if (gdiKey.Length > 0 && !string.Equals(gdiKey, DisplayKey, StringComparison.OrdinalIgnoreCase))
@@ -94,13 +107,15 @@ namespace TaskbarQuota.Taskbar
         }
 
         internal static string BuildDisplayKey(string? displayId, RECT bounds)
-            => BuildDisplayKey(displayId, stableMonitorId: null, bounds);
+            => BuildDisplayKey(displayId, monitorInterfaceName: null, bounds);
 
-        internal static string BuildDisplayKey(string? displayId, string? stableMonitorId, RECT bounds)
+        internal static string BuildDisplayKey(string? displayId, string? monitorInterfaceName, RECT bounds)
         {
-            string stable = SanitizeDisplayToken(stableMonitorId);
-            if (stable.Length > 0)
-                return stable;
+            // Windows registers this interface per monitor instance. Hash the complete path
+            // (including separators) to retain its identity in a bounded, file-safe key.
+            if (!string.IsNullOrWhiteSpace(monitorInterfaceName))
+                return "MONITOR_" + Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(monitorInterfaceName.Trim().ToUpperInvariant())));
 
             string sanitized = SanitizeDisplayToken(displayId);
             return sanitized.Length > 0
@@ -186,7 +201,15 @@ namespace TaskbarQuota.Taskbar
                     .First());
             }
 
-            return DisambiguateDisplayKeys(chosen);
+            // Older builds used model/driver IDs, sometimes shared by multiple monitors.
+            // Only offer an unqualified legacy alias when it has one possible live owner.
+            var legacyCounts = chosen.Where(target => target.LegacyDisplayKey.Length > 0)
+                .GroupBy(target => target.LegacyDisplayKey, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+            return chosen.Select(target => target.LegacyDisplayKey.Length > 0
+                    && legacyCounts[target.LegacyDisplayKey] > 1
+                ? target with { LegacyDisplayKey = string.Empty }
+                : target).ToList();
         }
 
         /// <summary>
@@ -248,6 +271,8 @@ namespace TaskbarQuota.Taskbar
             // The primary/sole-secondary heuristics are temporary routing fallbacks, not proof
             // of identity. Persisting one during an incomplete scan loses the original choice.
             resolved = persisted;
+            if (string.IsNullOrWhiteSpace(persisted))
+                return false;
             foreach (var item in live)
             {
                 if (MatchesIdentity(item, persisted.Trim()))
@@ -309,13 +334,23 @@ namespace TaskbarQuota.Taskbar
                 return string.Empty;
 
             var device = DISPLAY_DEVICE.Create();
-            return User32.EnumDisplayDevices(gdiDeviceName, 0, ref device, 0)
-                ? SanitizeDisplayToken(device.DeviceID)
-                : string.Empty;
+            for (uint index = 0; User32.EnumDisplayDevices(
+                gdiDeviceName, index, ref device, User32.EDD_GET_DEVICE_INTERFACE_NAME); index++)
+            {
+                if ((device.StateFlags & User32.DISPLAY_DEVICE_ACTIVE) != 0)
+                    return device.DeviceID;
+                device = DISPLAY_DEVICE.Create();
+            }
+
+            return string.Empty;
         }
 
         private static bool MatchesIdentity(DisplayIdentity identity, string key)
             => string.Equals(identity.DisplayKey, key, StringComparison.OrdinalIgnoreCase)
+                || (identity.LegacyDisplayKey.Length > 0
+                    && string.Equals(identity.LegacyDisplayKey, key, StringComparison.OrdinalIgnoreCase))
+                || (identity.LegacySuffixedDisplayKey.Length > 0
+                    && string.Equals(identity.LegacySuffixedDisplayKey, key, StringComparison.OrdinalIgnoreCase))
                 || string.Equals(identity.GdiDeviceName, key, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(
                     SanitizeDisplayToken(identity.GdiDeviceName),
@@ -329,52 +364,6 @@ namespace TaskbarQuota.Taskbar
 
         private static int DisplayArea(RECT bounds)
             => Math.Max(0, bounds.right - bounds.left) * Math.Max(0, bounds.bottom - bounds.top);
-
-        internal static IReadOnlyList<TaskbarWindowTarget> DisambiguateDisplayKeys(
-            IReadOnlyList<TaskbarWindowTarget> targets)
-        {
-            if (targets.Count < 2)
-                return targets;
-
-            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var target in targets)
-                counts[target.DisplayKey] = counts.GetValueOrDefault(target.DisplayKey) + 1;
-
-            bool anyDuplicate = false;
-            foreach (int count in counts.Values)
-            {
-                if (count > 1)
-                {
-                    anyDuplicate = true;
-                    break;
-                }
-            }
-
-            if (!anyDuplicate)
-                return targets;
-
-            var unique = new List<TaskbarWindowTarget>(targets.Count);
-            foreach (var target in targets)
-            {
-                if (counts[target.DisplayKey] == 1)
-                {
-                    unique.Add(target);
-                    continue;
-                }
-
-                string suffix = SanitizeDisplayToken(target.GdiDeviceName);
-                if (suffix.Length == 0)
-                {
-                    suffix = string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"{target.Bounds.left}_{target.Bounds.top}");
-                }
-
-                unique.Add(target with { DisplayKey = $"{target.DisplayKey}_{suffix}" });
-            }
-
-            return unique;
-        }
 
         private static bool EnumTaskbarWindow(IntPtr hwnd, IntPtr lParam)
         {
@@ -401,13 +390,21 @@ namespace TaskbarQuota.Taskbar
                 ? info.szDevice
                 : string.Empty;
             var keyBounds = info.rcMonitor.right > info.rcMonitor.left ? info.rcMonitor : bounds;
+            string gdiKey = SanitizeDisplayToken(gdiDevice);
+            var legacyDevice = DISPLAY_DEVICE.Create();
+            string legacyKey = gdiDevice.Length > 0
+                && User32.EnumDisplayDevices(gdiDevice, 0, ref legacyDevice, 0)
+                    ? SanitizeDisplayToken(legacyDevice.DeviceID)
+                    : string.Empty;
             targets.Add(new TaskbarWindowTarget(
                 hwnd,
                 isPrimary,
                 BuildDisplayKey(gdiDevice, TryGetMonitorDeviceId(gdiDevice), keyBounds),
-                SanitizeDisplayToken(gdiDevice),
+                gdiKey,
                 monitor,
-                bounds));
+                bounds,
+                legacyKey,
+                legacyKey.Length > 0 && gdiKey.Length > 0 ? $"{legacyKey}_{gdiKey}" : string.Empty));
             return true;
         }
 
@@ -426,7 +423,9 @@ namespace TaskbarQuota.Taskbar
 
             try
             {
-                bool foundSource = false;
+                // An earlier identity may already have migrated and then had its layout reset.
+                // Carry that completion forward even when no layout files remain to copy.
+                bool foundSource = File.Exists(sourcePath + ".migrated");
                 foreach (string suffix in new[] { "", ".order", ".activity", ".activity.manual" })
                 {
                     string source = sourcePath + suffix;

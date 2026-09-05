@@ -223,6 +223,8 @@ namespace TaskbarQuota.Interop
         public static extern bool GetMonitorInfo([In] IntPtr hMonitor, ref MONITORINFOEX lpmi);
 
         public const uint MONITORINFOF_PRIMARY = 1;
+        public const uint EDD_GET_DEVICE_INTERFACE_NAME = 1;
+        public const uint DISPLAY_DEVICE_ACTIVE = 1;
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         [return: MarshalAs(UnmanagedType.Bool)]
