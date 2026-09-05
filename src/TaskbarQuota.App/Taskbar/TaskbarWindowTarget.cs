@@ -54,14 +54,20 @@ namespace TaskbarQuota.Taskbar
         }
 
         public string GetPositionPath()
-        {
-            string directory = Path.Combine(
+            => GetPositionPath(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TaskbarQuota");
+                "TaskbarQuota"));
+
+        internal string GetPositionPath(string directory)
+        {
             string path = Path.Combine(directory, BuildPositionFileName(DisplayKey));
 
+            string gdiKey = SanitizeDisplayToken(GdiDeviceName);
+            if (gdiKey.Length > 0 && !string.Equals(gdiKey, DisplayKey, StringComparison.OrdinalIgnoreCase))
+                MigratePositionFiles(Path.Combine(directory, BuildPositionFileName(gdiKey)), path);
+
             if (IsPrimary)
-                return MigrateLegacyPrimaryPosition(directory, path);
+                MigratePositionFiles(Path.Combine(directory, "taskbar-widget-position.txt"), path);
 
             return path;
         }
@@ -239,23 +245,24 @@ namespace TaskbarQuota.Taskbar
             IReadOnlyList<DisplayIdentity> live,
             out string resolved)
         {
-            resolved = ResolvePersistedDisplayKey(persisted, live);
-            if (resolved.Length == 0
-                || string.Equals(resolved, persisted, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
+            // The primary/sole-secondary heuristics are temporary routing fallbacks, not proof
+            // of identity. Persisting one during an incomplete scan loses the original choice.
+            resolved = persisted;
             foreach (var item in live)
             {
-                if (string.Equals(item.DisplayKey, resolved, StringComparison.OrdinalIgnoreCase))
-                    return true;
+                if (MatchesIdentity(item, persisted.Trim()))
+                {
+                    resolved = item.DisplayKey;
+                    return !string.Equals(resolved, persisted, StringComparison.OrdinalIgnoreCase);
+                }
             }
 
             return false;
         }
 
-        internal static string GetDisplayKeyForWindow(IntPtr hwnd)
+        internal static string GetDisplayKeyForWindow(
+            IntPtr hwnd,
+            IReadOnlyList<TaskbarWindowTarget>? liveTargets = null)
         {
             if (hwnd == IntPtr.Zero || !User32.IsWindow(hwnd))
                 return string.Empty;
@@ -263,6 +270,12 @@ namespace TaskbarQuota.Taskbar
             var monitor = User32.MonitorFromWindow(hwnd, MonitorFromFlags.MONITOR_DEFAULTTONULL);
             if (monitor == IntPtr.Zero)
                 return string.Empty;
+
+            if (liveTargets is null)
+                TryFindAll(out liveTargets);
+            string canonicalKey = GetDisplayKeyForMonitor(monitor, liveTargets);
+            if (canonicalKey.Length > 0)
+                return canonicalKey;
 
             var info = MONITORINFOEX.Create();
             if (!User32.GetMonitorInfo(monitor, ref info))
@@ -272,6 +285,22 @@ namespace TaskbarQuota.Taskbar
                 info.szDevice,
                 TryGetMonitorDeviceId(info.szDevice),
                 info.rcMonitor);
+        }
+
+        internal static string GetDisplayKeyForMonitor(
+            IntPtr monitor,
+            IReadOnlyList<TaskbarWindowTarget> liveTargets)
+        {
+            if (monitor != IntPtr.Zero)
+            {
+                foreach (var target in liveTargets)
+                {
+                    if (target.Monitor == monitor)
+                        return target.DisplayKey;
+                }
+            }
+
+            return string.Empty;
         }
 
         internal static string TryGetMonitorDeviceId(string? gdiDeviceName)
@@ -389,23 +418,37 @@ namespace TaskbarQuota.Taskbar
         private static RECT GetBounds(IntPtr hwnd)
             => User32.GetWindowRect(hwnd, out var bounds) ? bounds : default;
 
-        private static string MigrateLegacyPrimaryPosition(string directory, string displayPositionPath)
+        private static void MigratePositionFiles(string sourcePath, string destinationPath)
         {
-            string legacyPath = Path.Combine(directory, "taskbar-widget-position.txt");
-            if (File.Exists(displayPositionPath) || !File.Exists(legacyPath))
-                return displayPositionPath;
+            string migrationMarker = destinationPath + ".migrated";
+            if (File.Exists(migrationMarker))
+                return;
 
             try
             {
-                Directory.CreateDirectory(directory);
-                File.Move(legacyPath, displayPositionPath);
-                Log.Information($"Migrated the primary taskbar widget position to {Path.GetFileName(displayPositionPath)}");
-                return displayPositionPath;
+                bool foundSource = false;
+                foreach (string suffix in new[] { "", ".order", ".activity", ".activity.manual" })
+                {
+                    string source = sourcePath + suffix;
+                    string destination = destinationPath + suffix;
+                    if (!File.Exists(source))
+                        continue;
+
+                    foundSource = true;
+                    // Preserve the original for retries and older app versions. Never overwrite
+                    // a position the user has already saved under the new monitor identity.
+                    if (!File.Exists(destination))
+                        File.Copy(source, destination);
+                }
+
+                // A later user reset may delete a position or manual-position marker. Do not
+                // restore those deliberately removed files the next time the host is created.
+                if (foundSource)
+                    File.WriteAllText(migrationMarker, "1");
             }
             catch (Exception ex)
             {
-                Log.Warning(ex, "Could not migrate the primary taskbar widget position");
-                return legacyPath;
+                Log.Warning(ex, $"Could not migrate taskbar layout {Path.GetFileName(sourcePath)}");
             }
         }
     }

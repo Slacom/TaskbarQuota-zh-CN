@@ -25,6 +25,7 @@ namespace TaskbarQuota.Views
         // Per-provider controls, so changing one updates only its own row instead of rebuilding the list.
         private readonly Dictionary<ProviderId, ProviderToggleRow> _providerRows = new();
         private readonly List<PinOption> _pinOptions = new();
+        private IReadOnlyList<DisplayIdentity> _pinDisplayIdentities = [];
 
         private sealed record TaskbarPlacementOption(
             string Label,
@@ -382,14 +383,8 @@ namespace TaskbarQuota.Views
                     identities.Add(target.ToIdentity());
 
                 string selectedKey = WidgetSettingsService.SelectedTaskbarDisplayKey;
-                if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay
-                    && TaskbarWindowTarget.TryMigratePersistedKey(selectedKey, identities, out string migrated)
-                    && !_isInitializing)
-                {
-                    WidgetSettingsService.ApplyTaskbarPlacement(TaskbarPlacementMode.SelectedDisplay, migrated);
-                    selectedKey = migrated;
-                }
-                else if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay)
+                // The manager owns persistence after topology settles; this scan is only for labels.
+                if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay)
                 {
                     selectedKey = TaskbarWindowTarget.ResolvePersistedDisplayKey(selectedKey, identities);
                 }
@@ -436,6 +431,7 @@ namespace TaskbarQuota.Views
         private void BuildPinOptions()
         {
             _pinOptions.Clear();
+            _pinDisplayIdentities = [];
             _pinOptions.Add(new("Not pinned", false));
 
             if (WidgetSettingsService.CurrentTaskbarPlacement != TaskbarPlacementMode.Adaptive)
@@ -461,6 +457,7 @@ namespace TaskbarQuota.Views
             }
 
             var identities = displays.Select(target => target.ToIdentity()).ToList();
+            _pinDisplayIdentities = identities;
             _pinOptions.Add(new("Pinned — follow app", true));
             _pinOptions.Add(new(
                 "Pinned — all screens",
@@ -490,7 +487,7 @@ namespace TaskbarQuota.Views
             }
         }
 
-        private static bool PinOptionMatches(ProviderId provider, PinOption option)
+        private bool PinOptionMatches(ProviderId provider, PinOption option)
         {
             bool pinned = WidgetSettingsService.IsProviderPinned(provider);
             if (pinned != option.IsPinned)
@@ -501,6 +498,7 @@ namespace TaskbarQuota.Views
                 return true;
 
             string selected = WidgetSettingsService.GetPinnedProviderDisplay(provider) ?? string.Empty;
+            selected = TaskbarWindowTarget.ResolvePersistedDisplayKey(selected, _pinDisplayIdentities);
             return string.Equals(selected, option.DisplayKey, System.StringComparison.OrdinalIgnoreCase);
         }
 

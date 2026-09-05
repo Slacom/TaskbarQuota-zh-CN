@@ -1,6 +1,7 @@
 using System.Linq;
 using TaskbarQuota.Interop;
 using TaskbarQuota.Taskbar;
+using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.Tests;
 
@@ -169,8 +170,8 @@ public class TaskbarWindowTargetTests
         ];
 
         Assert.Equal("MONITORB", TaskbarWindowTarget.ResolvePersistedDisplayKey("DISPLAY2", live));
-        Assert.True(TaskbarWindowTarget.TryMigratePersistedKey("DISPLAY2", live, out string migrated));
-        Assert.Equal("MONITORB", migrated);
+        Assert.False(TaskbarWindowTarget.TryMigratePersistedKey("DISPLAY2", live, out string persisted));
+        Assert.Equal("DISPLAY2", persisted);
     }
 
     [Fact]
@@ -197,6 +198,125 @@ public class TaskbarWindowTargetTests
 
         Assert.Equal("DISPLAY2", TaskbarWindowTarget.ResolvePersistedDisplayKey("DISPLAY2", live));
         Assert.False(TaskbarWindowTarget.TryMigratePersistedKey("DISPLAY2", live, out _));
+    }
+
+    [Fact]
+    public void Window_monitor_uses_canonical_key_for_adaptive_history_with_duplicate_ids()
+    {
+        var targets = TaskbarWindowTarget.SelectCanonicalTaskbars([
+            Target(1, true, "GENERIC", "DISPLAY1", 10, 0),
+            Target(2, false, "GENERIC", "DISPLAY2", 20, 1920),
+        ]);
+        string windowKey = TaskbarWindowTarget.GetDisplayKeyForMonitor(new IntPtr(20), targets);
+        var history = new AdaptiveDisplayProviderState();
+        history.Observe(ProviderId.Codex, windowKey, new IntPtr(100));
+
+        Assert.Equal("GENERIC_DISPLAY2", windowKey);
+        Assert.Equal(ProviderId.Codex, history.GetProvider(targets[1].DisplayKey));
+        Assert.Null(history.GetProvider(targets[0].DisplayKey));
+        Assert.Equal(string.Empty, TaskbarWindowTarget.GetDisplayKeyForMonitor(IntPtr.Zero, targets));
+        Assert.Equal(string.Empty, TaskbarWindowTarget.GetDisplayKeyForMonitor(new IntPtr(99), targets));
+    }
+
+    [Fact]
+    public void Migration_preserves_selection_until_missing_monitor_returns()
+    {
+        DisplayIdentity[] partial = [
+            new("MONITORA", "DISPLAY6", true),
+            new("MONITORB", "DISPLAY7", false),
+        ];
+        // Even repeated incomplete scans must not permanently assign DISPLAY8 to B.
+        for (int i = 0; i < 3; i++)
+        {
+            Assert.Equal("MONITORB", TaskbarWindowTarget.ResolvePersistedDisplayKey("DISPLAY8", partial));
+            Assert.False(TaskbarWindowTarget.TryMigratePersistedKey("DISPLAY8", partial, out string saved));
+            Assert.Equal("DISPLAY8", saved);
+        }
+
+        DisplayIdentity[] complete = [.. partial, new("MONITORC", "DISPLAY8", false)];
+        Assert.True(TaskbarWindowTarget.TryMigratePersistedKey("DISPLAY8", complete, out string migrated));
+        Assert.Equal("MONITORC", migrated);
+        Assert.False(TaskbarWindowTarget.TryMigratePersistedKey(migrated, complete, out _));
+    }
+
+    [Fact]
+    public void Migration_does_not_persist_a_guessed_primary()
+    {
+        DisplayIdentity[] live = [new("MONITORA", "DISPLAY6", true)];
+        Assert.Equal("MONITORA", TaskbarWindowTarget.ResolvePersistedDisplayKey("DISPLAY1", live));
+        Assert.False(TaskbarWindowTarget.TryMigratePersistedKey("DISPLAY1", live, out string saved));
+        Assert.Equal("DISPLAY1", saved);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Position_migration_preserves_layout_files_and_existing_destination(bool primary, bool legacy)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "taskbarquota-layout-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var target = Target(1, primary, "MONITORB", "DISPLAY2", 20, 1920);
+            string source = Path.Combine(directory, legacy
+                ? "taskbar-widget-position.txt"
+                : "taskbar-widget-position-DISPLAY2.txt");
+            string destination = Path.Combine(directory, "taskbar-widget-position-MONITORB.txt");
+            string[] suffixes = ["", ".order", ".activity", ".activity.manual"];
+            string[] contents = ["123", "ActivityFirst", "456", "1"];
+            for (int i = 0; i < suffixes.Length; i++)
+                File.WriteAllText(source + suffixes[i], contents[i]);
+
+            Assert.Equal(destination, target.GetPositionPath(directory));
+            for (int i = 0; i < suffixes.Length; i++)
+            {
+                Assert.Equal(contents[i], File.ReadAllText(destination + suffixes[i]));
+                Assert.Equal(contents[i], File.ReadAllText(source + suffixes[i]));
+                File.WriteAllText(destination + suffixes[i], "updated");
+            }
+
+            target.GetPositionPath(directory);
+            foreach (string suffix in suffixes)
+                Assert.Equal("updated", File.ReadAllText(destination + suffix));
+
+            // Clearing manual layout must survive another host creation, even with old files present.
+            foreach (string suffix in suffixes)
+                File.Delete(destination + suffix);
+            target.GetPositionPath(directory);
+            foreach (string suffix in suffixes)
+                Assert.False(File.Exists(destination + suffix));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Position_migration_copies_sidecars_even_when_main_position_already_exists()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "taskbarquota-layout-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var target = Target(1, false, "MONITORB", "DISPLAY2", 20, 1920);
+            string source = Path.Combine(directory, "taskbar-widget-position-DISPLAY2.txt");
+            string destination = Path.Combine(directory, "taskbar-widget-position-MONITORB.txt");
+            File.WriteAllText(destination, "789");
+            File.WriteAllText(source + ".activity", "456");
+            File.WriteAllText(source + ".activity.manual", "1");
+
+            target.GetPositionPath(directory);
+
+            Assert.Equal("789", File.ReadAllText(destination));
+            Assert.Equal("456", File.ReadAllText(destination + ".activity"));
+            Assert.Equal("1", File.ReadAllText(destination + ".activity.manual"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static TaskbarWindowTarget Target(
