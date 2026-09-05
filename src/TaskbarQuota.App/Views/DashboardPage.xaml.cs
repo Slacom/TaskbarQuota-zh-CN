@@ -525,11 +525,12 @@ namespace TaskbarQuota.Views
                 && WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.Adaptive;
             ProviderPinText.Text = canPinHere ? "Pin here" : card.ProviderPinToggleText;
 
+            TaskbarWindowTarget.TryFindAll(out var pinDisplays);
             string? fixedDisplay = WidgetSettingsService.GetPinnedProviderDisplay(card.ProviderId);
             string tooltip = card.IsProviderPinned && fixedDisplay is not null
-                ? $"Pinned to {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}"
+                ? $"Pinned to {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay, pinDisplays)}"
                 : canPinHere
-                    ? $"Pin {card.DisplayName} to {TaskbarWindowTarget.GetDisplayLabel(_pinHereDisplayKey)}"
+                    ? $"Pin {card.DisplayName} to {TaskbarWindowTarget.GetDisplayLabel(_pinHereDisplayKey, pinDisplays)}"
                     : DefaultPinTooltip;
             ToolTipService.SetToolTip(ProviderPinToggle, tooltip);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ProviderPinToggle, tooltip);

@@ -373,36 +373,37 @@ namespace TaskbarQuota.Views
                 AddTaskbarPlacementOption(new("All screens", TaskbarPlacementMode.AllDisplays));
 
                 var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-                if (TaskbarWindowTarget.TryFindAll(out var targets))
-                {
-                    foreach (var target in targets
-                        .OrderBy(target => target.DisplayNumber == 0 ? int.MaxValue : target.DisplayNumber)
-                        .ThenByDescending(target => target.IsPrimary))
-                    {
-                        if (!seen.Add(target.DisplayKey))
-                            continue;
+                IReadOnlyList<TaskbarWindowTarget> targets = System.Array.Empty<TaskbarWindowTarget>();
+                if (TaskbarWindowTarget.TryFindAll(out var found))
+                    targets = found;
 
-                        string screenName = target.DisplayNumber > 0
-                            ? $"Screen {target.DisplayNumber}"
-                            : "Detected screen";
-                        if (target.IsPrimary)
-                            screenName += " (primary)";
-                        AddTaskbarPlacementOption(new(
-                            screenName,
-                            TaskbarPlacementMode.SelectedDisplay,
-                            target.DisplayKey));
-                    }
-                }
+                var identities = new List<DisplayIdentity>(targets.Count);
+                foreach (var target in targets)
+                    identities.Add(target.ToIdentity());
 
                 string selectedKey = WidgetSettingsService.SelectedTaskbarDisplayKey;
                 if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay
-                    && selectedKey.Length > 0
-                    && seen.Add(selectedKey))
+                    && TaskbarWindowTarget.TryMigratePersistedKey(selectedKey, identities, out string migrated)
+                    && !_isInitializing)
                 {
+                    WidgetSettingsService.ApplyTaskbarPlacement(TaskbarPlacementMode.SelectedDisplay, migrated);
+                    selectedKey = migrated;
+                }
+                else if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay)
+                {
+                    selectedKey = TaskbarWindowTarget.ResolvePersistedDisplayKey(selectedKey, identities);
+                }
+
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    var target = targets[i];
+                    if (!seen.Add(target.DisplayKey))
+                        continue;
+
                     AddTaskbarPlacementOption(new(
-                        $"{selectedKey} (disconnected)",
+                        TaskbarWindowTarget.FormatScreenLabel(i + 1, target.IsPrimary),
                         TaskbarPlacementMode.SelectedDisplay,
-                        selectedKey));
+                        target.DisplayKey));
                 }
 
                 AddTaskbarPlacementOption(new("Adaptive (follow each agent)", TaskbarPlacementMode.Adaptive));
@@ -449,32 +450,27 @@ namespace TaskbarQuota.Views
                 return;
             }
 
-            var displays = targets
-                .GroupBy(target => target.DisplayKey, System.StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .OrderBy(target => target.DisplayNumber == 0 ? int.MaxValue : target.DisplayNumber)
-                .ThenByDescending(target => target.IsPrimary)
-                .ToList();
+            var displays = TaskbarWindowTarget.OrderForDisplay(
+                targets
+                    .GroupBy(target => target.DisplayKey, System.StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First()));
             if (displays.Count < 2)
             {
                 _pinOptions.Add(new("Pinned", true, MatchesAnyDestination: true));
                 return;
-
             }
 
+            var identities = displays.Select(target => target.ToIdentity()).ToList();
             _pinOptions.Add(new("Pinned — follow app", true));
             _pinOptions.Add(new(
                 "Pinned — all screens",
                 true,
                 WidgetSettingsService.AllDisplaysPinDestination));
 
-            foreach (var target in displays)
+            for (int i = 0; i < displays.Count; i++)
             {
-                string screenName = target.DisplayNumber > 0
-                    ? $"Screen {target.DisplayNumber}"
-                    : "Detected screen";
-                if (target.IsPrimary)
-                    screenName += " (primary)";
+                var target = displays[i];
+                string screenName = TaskbarWindowTarget.FormatScreenLabel(i + 1, target.IsPrimary);
                 _pinOptions.Add(new($"Pinned — {screenName}", true, target.DisplayKey));
             }
 
@@ -483,10 +479,14 @@ namespace TaskbarQuota.Views
             foreach (ProviderId provider in System.Enum.GetValues<ProviderId>())
             {
                 string? saved = WidgetSettingsService.GetPinnedProviderDisplay(provider);
-                if (saved is not null
-                    && saved != WidgetSettingsService.AllDisplaysPinDestination
-                    && known.Add(saved))
-                    _pinOptions.Add(new($"Pinned — {saved} (disconnected)", true, saved));
+                if (saved is null || saved == WidgetSettingsService.AllDisplaysPinDestination)
+                    continue;
+
+                string resolved = TaskbarWindowTarget.ResolvePersistedDisplayKey(saved, identities);
+                if (!known.Add(resolved))
+                    continue;
+
+                _pinOptions.Add(new("Pinned — previously chosen screen (unavailable)", true, saved));
             }
         }
 

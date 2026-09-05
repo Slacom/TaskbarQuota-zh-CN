@@ -837,9 +837,10 @@ namespace TaskbarQuota
                 item.Pin.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
 
             string? fixedDisplay = WidgetSettingsService.GetPinnedProviderDisplay(id);
+            TaskbarWindowTarget.TryFindAll(out var pinDisplays);
             string pinDescription = fixedDisplay is null
                 ? "pinned — follows app screen"
-                : $"pinned to {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}";
+                : $"pinned to {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay, pinDisplays)}";
             ToolTipService.SetToolTip(button, pinned ? $"{displayName} — {pinDescription}" : displayName);
         }
 

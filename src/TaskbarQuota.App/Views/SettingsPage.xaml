@@ -90,7 +90,7 @@
 
             <tk:SettingsCard x:Name="TaskbarPlacementCard"
                              Header="Taskbar screens"
-                             Description="Show the same usage on every taskbar, choose one screen, or keep one active provider per screen. With two or more screens, Adaptive mode also lets each pinned provider target a fixed screen.">
+                             Description="Show the same usage on every taskbar, choose one screen, or keep one active provider per screen. Screens are numbered from the current layout, primary first. With two or more screens, Adaptive mode also lets each pinned provider target a fixed screen.">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7F4;"/>
                 </tk:SettingsCard.HeaderIcon>

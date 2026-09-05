@@ -221,6 +221,16 @@ namespace TaskbarQuota.Interop
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, EntryPoint = "GetMonitorInfo")]
         public static extern bool GetMonitorInfo([In] IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+        public const uint MONITORINFOF_PRIMARY = 1;
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumDisplayDevices(
+            string? lpDevice,
+            uint iDevNum,
+            ref DISPLAY_DEVICE lpDisplayDevice,
+            uint dwFlags);
     }
 
     public static class WtsApi32
@@ -240,6 +250,7 @@ namespace TaskbarQuota.Interop
     {
         public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         public const int DWMWA_CLOAK = 13;
+        public const int DWMWA_CLOAKED = 14;
 
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(
@@ -254,6 +265,13 @@ namespace TaskbarQuota.Interop
             int attribute,
             ref int value,
             int valueSize);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(
+            IntPtr hwnd,
+            int attribute,
+            out int pfAttribute,
+            int cbAttribute);
     }
 
     public enum DwmWindowCornerPreference
@@ -296,6 +314,30 @@ namespace TaskbarQuota.Interop
         {
             cbSize = Marshal.SizeOf<MONITORINFOEX>(),
             szDevice = string.Empty,
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    public struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+        public uint StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+
+        public static DISPLAY_DEVICE Create() => new()
+        {
+            cb = Marshal.SizeOf<DISPLAY_DEVICE>(),
+            DeviceName = string.Empty,
+            DeviceString = string.Empty,
+            DeviceID = string.Empty,
+            DeviceKey = string.Empty,
         };
     }
 
