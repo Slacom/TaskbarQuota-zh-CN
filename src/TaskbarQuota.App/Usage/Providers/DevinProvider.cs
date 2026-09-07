@@ -72,9 +72,9 @@ namespace TaskbarQuota.Usage.Providers
 
             if (sawAuthFailure)
                 throw new ProviderException(ProviderErrorKind.AuthRequired,
-                    "Devin sign-in expired. Run `devin auth login` or sign in to the Devin app.");
+                    "Devin 登录已过期，请运行 `devin auth login` 或在 Devin 应用中登录。");
 
-            throw new ProviderException(ProviderErrorKind.Other, "Devin quota data unavailable. Try again later.");
+            throw new ProviderException(ProviderErrorKind.Other, "暂时无法获取 Devin 额度数据，请稍后重试。");
         }
 
         // --- Cloud (GetUserStatus) ----------------------------------------------------------------

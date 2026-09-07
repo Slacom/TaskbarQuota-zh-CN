@@ -205,7 +205,7 @@ namespace TaskbarQuota
                 }
                 : null;
 
-            ToolTipService.SetToolTip(item, pinned ? $"{displayName} — pinned in the usage widget" : displayName);
+            ToolTipService.SetToolTip(item, pinned ? $"{displayName} — 已固定到用量小组件" : displayName);
         }
 
         /// <summary>

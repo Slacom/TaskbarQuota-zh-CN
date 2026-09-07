@@ -108,10 +108,11 @@ public sealed partial class AgentActivitySummary : UserControl
         ProviderIcon.Visibility = showProviderMarker ? Visibility.Visible : Visibility.Collapsed;
         UpdateNavigation(items, item.Id);
         TitleText.Text = ActivityTitle(item);
-        StepText.Text = $"{item.StatusText} · {SummaryText(item)}";
-        var accessibleSummary = $"{ActivityTitle(item)}, {providerName}, {item.StatusText}. {SummaryText(item)}";
-        AutomationProperties.SetName(OpenActivityButton, $"Open agent activity. {accessibleSummary}");
-        AutomationProperties.SetName(ProviderIcon, $"{providerName}, {item.StatusText}");
+        var statusText = LocalizedStatusText(item.Status);
+        StepText.Text = $"{statusText} · {SummaryText(item)}";
+        var accessibleSummary = $"{ActivityTitle(item)}，{providerName}，{statusText}。{SummaryText(item)}";
+        AutomationProperties.SetName(OpenActivityButton, $"打开智能体活动。{accessibleSummary}");
+        AutomationProperties.SetName(ProviderIcon, $"{providerName}，{statusText}");
         ApplyForeground();
         if (shouldReveal)
         {
@@ -253,9 +254,9 @@ public sealed partial class AgentActivitySummary : UserControl
     private static string SummaryText(AgentActivityItem item) => item.Status switch
     {
         AgentActivityStatus.Completed => string.IsNullOrWhiteSpace(item.Step) || item.Step == "Completed"
-            ? "Task completed"
+            ? "任务已完成"
             : Condense(item.Step),
-        AgentActivityStatus.Failed => "Task needs attention",
+        AgentActivityStatus.Failed => "任务需要处理",
         _ => Condense(item.Step),
     };
 
@@ -268,11 +269,11 @@ public sealed partial class AgentActivitySummary : UserControl
         int failed = items.Count(item => item.Status == AgentActivityStatus.Failed);
         var parts = new[]
         {
-            working > 0 ? $"{working} working" : "",
-            waiting > 0 ? $"{waiting} waiting" : "",
-            idle > 0 ? $"{idle} idle" : "",
-            completed > 0 ? $"{completed} done" : "",
-            failed > 0 ? $"{failed} failed" : "",
+            working > 0 ? $"{working} 个处理中" : "",
+            waiting > 0 ? $"{waiting} 个等待中" : "",
+            idle > 0 ? $"{idle} 个空闲" : "",
+            completed > 0 ? $"{completed} 个已完成" : "",
+            failed > 0 ? $"{failed} 个失败" : "",
         }.Where(part => part.Length > 0);
         return string.Join(" · ", parts);
     }
@@ -309,8 +310,18 @@ public sealed partial class AgentActivitySummary : UserControl
     private static string ActivityTitle(AgentActivityItem item)
         => !string.IsNullOrWhiteSpace(item.Host)
             && string.Equals(item.Title, ProviderDisplayName(item.Provider), StringComparison.OrdinalIgnoreCase)
-            ? $"{ProviderDisplayName(item.Provider)} through {item.Host}"
+            ? $"{ProviderDisplayName(item.Provider)} 经 {item.Host}"
             : item.Title;
+
+    private static string LocalizedStatusText(AgentActivityStatus status) => status switch
+    {
+        AgentActivityStatus.Working => "处理中",
+        AgentActivityStatus.Waiting => "等待中",
+        AgentActivityStatus.Idle => "空闲",
+        AgentActivityStatus.Completed => "已完成",
+        AgentActivityStatus.Failed => "失败",
+        _ => status.ToString(),
+    };
 
     private void ApplyForeground()
     {

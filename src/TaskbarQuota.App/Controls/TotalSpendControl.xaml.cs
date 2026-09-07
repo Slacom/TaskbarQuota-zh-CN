@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using System.Windows.Input;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Services;
 using TaskbarQuota.ViewModels;
 using Windows.UI.ViewManagement;
@@ -143,9 +144,9 @@ namespace TaskbarQuota.Controls
                 return;
 
             var flyout = new MenuFlyout();
-            flyout.Items.Add(CreateShareItem("Summary", 1));
-            flyout.Items.Add(CreateShareItem("Summary and daily cost", 2));
-            flyout.Items.Add(CreateShareItem("Everything", 3));
+            flyout.Items.Add(CreateShareItem("摘要", 1));
+            flyout.Items.Add(CreateShareItem("摘要和每日成本", 2));
+            flyout.Items.Add(CreateShareItem("全部内容", 3));
             flyout.ShowAt(button);
         }
 
@@ -199,7 +200,7 @@ namespace TaskbarQuota.Controls
 
             ShareCardHelper.ShowTransientTip(
                 ShareTip,
-                copied ? "Image copied to clipboard" : "Couldn't copy the image",
+                copied ? "图片已复制到剪贴板" : "无法复制图片",
                 CostShareButton);
         }
 
@@ -270,7 +271,7 @@ namespace TaskbarQuota.Controls
                 };
                 ToolTipService.SetToolTip(
                     segment,
-                    $"{slices[index].ProviderName}: {slices[index].SummaryValueText} ({slices[index].ShareText})");
+                    $"{slices[index].ProviderName}：{slices[index].SummaryValueText}（{slices[index].ShareText}）");
                 Canvas.SetLeft(segment, offsetX);
                 Canvas.SetTop(segment, offsetY);
                 SpendRingCanvas.Children.Add(segment);
@@ -385,7 +386,7 @@ namespace TaskbarQuota.Controls
             {
                 var empty = new TextBlock
                 {
-                    Text = "No transcript activity in this window.",
+                    Text = "此时间段内没有会话活动。",
                     Foreground = ResolveBrush("TextFillColorSecondaryBrush", Colors.Gray),
                     Style = Application.Current.Resources["BodyTextBlockStyle"] as Style,
                 };
@@ -429,7 +430,7 @@ namespace TaskbarQuota.Controls
                 {
                     var label = new TextBlock
                     {
-                        Text = point.Date.ToString("MMM d", CultureInfo.CurrentCulture),
+                        Text = point.Date.ToString("M月d日", CultureInfo.GetCultureInfo("zh-CN")),
                         Foreground = ResolveBrush("TextFillColorSecondaryBrush", Colors.Gray),
                         Style = Application.Current.Resources["CaptionTextBlockStyle"] as Style,
                     };
@@ -494,9 +495,9 @@ namespace TaskbarQuota.Controls
         private static string BuildDayTooltip(UsageChartDayViewModel point)
         {
             var providers = string.Join(Environment.NewLine, point.Providers.Select(provider =>
-                $"{provider.ProviderName}: {provider.Tokens:N0} tokens · {(provider.CostUsd.HasValue ? $"${provider.CostUsd.Value:F2}" : "cost unavailable")}"));
+                $"{provider.ProviderName}：{provider.Tokens:N0} Token · {(provider.CostUsd.HasValue ? $"${provider.CostUsd.Value:F2}" : "成本不可用")}"));
             var totalCost = $"${point.CostUsd:F2}{(point.CostComplete ? string.Empty : "*")}";
-            return $"{point.Date:dddd, MMM d}{Environment.NewLine}{point.TotalTokens:N0} tokens · {totalCost}{(providers.Length > 0 ? Environment.NewLine + providers : string.Empty)}";
+            return $"{point.Date:M月d日 dddd}{Environment.NewLine}{point.TotalTokens:N0} Token · {totalCost}{(providers.Length > 0 ? Environment.NewLine + providers : string.Empty)}";
         }
 
     }

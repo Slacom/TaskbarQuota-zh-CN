@@ -446,10 +446,10 @@ public class ZaiProviderTests
             var result = UsageResult.Success(ProviderId.Zai, new ZaiProvider(), new ProviderFetchResult(usage, "api"));
 
             var defaultLabels = WidgetSummary.BuildRowLabelsForTesting(result, usage);
-            Assert.Equal(new[] { "Session", "MCP" }, defaultLabels);
+            Assert.Equal(new[] { "会话", "MCP" }, defaultLabels);
 
             WidgetSettingsService.SetRowVisibleForTesting(ProviderId.Zai, WidgetSettingsService.RowExtra, false);
-            Assert.Equal(new[] { "Session" }, WidgetSummary.BuildRowLabelsForTesting(result, usage));
+            Assert.Equal(new[] { "会话" }, WidgetSummary.BuildRowLabelsForTesting(result, usage));
 
             WidgetSettingsService.SetRowVisibleForTesting(ProviderId.Zai, WidgetSettingsService.RowExtra, true);
             WidgetSettingsService.SetRowVisibleForTesting(ProviderId.Zai, WidgetSettingsService.RowPrimary, false);

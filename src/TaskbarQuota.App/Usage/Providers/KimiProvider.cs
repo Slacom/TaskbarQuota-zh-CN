@@ -61,7 +61,7 @@ namespace TaskbarQuota.Usage.Providers
                     ProviderInstallDetector.NotInstalledMessage(ProviderId.Kimi));
 
             throw new ProviderException(ProviderErrorKind.AuthRequired,
-                "Kimi Code API key not found. Set KIMI_CODE_API_KEY or run `kimi` and /login.");
+                "未找到 Kimi Code API 密钥。请设置 KIMI_CODE_API_KEY，或运行 `kimi` 后执行 /login。");
         }
 
 
@@ -82,11 +82,11 @@ namespace TaskbarQuota.Usage.Providers
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Kimi Code API key invalid or expired.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Kimi Code API 密钥无效或已过期。");
             if ((int)response.StatusCode == 403)
-                throw new ProviderException(ProviderErrorKind.Other, "Kimi Code API: permission or quota denied.");
+                throw new ProviderException(ProviderErrorKind.Other, "Kimi Code API 拒绝访问：权限不足或额度受限。");
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Kimi Code API returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Kimi Code API 返回状态码 {(int)response.StatusCode}");
 
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
@@ -167,7 +167,7 @@ namespace TaskbarQuota.Usage.Providers
 
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Kimi web API returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Kimi Web API 返回状态码 {(int)response.StatusCode}");
 
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);

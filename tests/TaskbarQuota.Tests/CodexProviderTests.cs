@@ -150,7 +150,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "Session", "Weekly" }, labels);
+            Assert.Equal(new[] { "会话", "每周" }, labels);
         }
         finally
         {
@@ -168,7 +168,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "Session", "Weekly", "Resets" }, labels);
+            Assert.Equal(new[] { "会话", "每周", "Resets" }, labels);
         }
         finally
         {
@@ -186,7 +186,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "Session", "Weekly" }, labels);
+            Assert.Equal(new[] { "会话", "每周" }, labels);
         }
         finally
         {
@@ -346,7 +346,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "Session", "Weekly", "Spark Session", "Spark Weekly" }, labels);
+            Assert.Equal(new[] { "会话", "每周", "Spark 会话", "Spark 每周" }, labels);
         }
         finally
         {

@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Navigation;
 using TaskbarQuota.Usage;
 using TaskbarQuota.Services;
 using TaskbarQuota.Taskbar;
+using TaskbarQuota.Localization;
 using TaskbarQuota.ViewModels;
 using Windows.System;
 
@@ -207,10 +208,10 @@ namespace TaskbarQuota.Views
 
             if (vm.IsApiKey)
             {
-                var pwd = new PasswordBox { Password = vm.ApiKey, MinWidth = 280, PlaceholderText = "Paste your API key..." };
+                var pwd = new PasswordBox { Password = vm.ApiKey, MinWidth = 280, PlaceholderText = "粘贴 API 密钥…" };
                 pwd.PasswordChanged += (_, _) => vm.ApiKey = pwd.Password;
 
-                stack.Children.Add(new TextBlock { Text = "API key", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                stack.Children.Add(new TextBlock { Text = "API 密钥", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
                 stack.Children.Add(Caption(vm.ApiKeyHeader));
                 stack.Children.Add(pwd);
             }
@@ -221,46 +222,46 @@ namespace TaskbarQuota.Views
                 {
                     Text = vm.CookieHeader,
                     MinWidth = 280,
-                    PlaceholderText = isOpenCode ? "Cookie value or full copied cURL command" : "name1=value1; name2=value2",
+                    PlaceholderText = isOpenCode ? "Cookie 值或完整复制的 cURL 命令" : "name1=value1; name2=value2",
                     AcceptsReturn = isOpenCode,
                     TextWrapping = isOpenCode ? TextWrapping.Wrap : TextWrapping.NoWrap,
                     MaxHeight = isOpenCode ? 120 : double.PositiveInfinity,
                 };
                 tb.TextChanged += (_, _) => vm.CookieHeader = tb.Text;
 
-                stack.Children.Add(new TextBlock { Text = "Cookie header", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                stack.Children.Add(Caption("Leave blank to keep auto-detection."));
+                stack.Children.Add(new TextBlock { Text = "Cookie 请求头", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                stack.Children.Add(Caption("留空可继续使用自动检测。"));
                 stack.Children.Add(tb);
 
                 if (isOpenCode)
                 {
                     stack.Children.Add(new TextBlock
                     {
-                        Text = "Chromium 127+ manual setup",
+                        Text = "Chromium 127+ 手动设置",
                         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     });
-                    stack.Children.Add(Caption("Chrome, Edge, and Brave 127+ protect cookies with App-Bound Encryption, so TaskbarQuota may not be able to read them automatically."));
-                    stack.Children.Add(Caption("1. Open opencode.ai in the browser where you are signed in. Press F12, choose Network, and reload the page."));
-                    stack.Children.Add(Caption("2. Click an opencode.ai request, right-click it, then choose Copy → Copy as cURL."));
-                    stack.Children.Add(Caption("3. Paste either the full copied cURL command or only the text after Cookie:. TaskbarQuota extracts the cookie automatically; it should include auth=... or __Host-auth=...."));
+                    stack.Children.Add(Caption("Chrome、Edge 和 Brave 127+ 使用应用绑定加密保护 Cookie，因此 TaskbarQuota 可能无法自动读取。"));
+                    stack.Children.Add(Caption("1. 在已登录的浏览器中打开 opencode.ai，按 F12，选择“网络”，然后刷新页面。"));
+                    stack.Children.Add(Caption("2. 选择一个 opencode.ai 请求，右键单击并选择“复制 → 复制为 cURL”。"));
+                    stack.Children.Add(Caption("3. 粘贴完整的 cURL 命令，或仅粘贴 Cookie: 后面的内容。TaskbarQuota 会自动提取 Cookie，其中应包含 auth=... 或 __Host-auth=...。"));
 
                     var workspace = new TextBox
                     {
                         Text = vm.WorkspaceId,
                         MinWidth = 280,
-                        PlaceholderText = "wrk_... or workspace URL",
+                        PlaceholderText = "wrk_... 或工作区网址",
                         AcceptsReturn = false,
                     };
                     workspace.TextChanged += (_, _) => vm.WorkspaceId = workspace.Text;
-                    stack.Children.Add(new TextBlock { Text = "Workspace ID (optional; usually auto-detected)", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                    stack.Children.Add(Caption("Only fill this when detection fails or you have multiple workspaces. Copy the wrk_... part from the OpenCode workspace URL; a full workspace URL also works."));
+                    stack.Children.Add(new TextBlock { Text = "工作区 ID（可选，通常会自动检测）", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                    stack.Children.Add(Caption("仅在检测失败或拥有多个工作区时填写。可从 OpenCode 工作区网址复制 wrk_... 部分，也可填写完整网址。"));
                     stack.Children.Add(workspace);
 
-                    stack.Children.Add(Caption("Cookie headers are session credentials. Keep them private."));
+                    stack.Children.Add(Caption("Cookie 请求头属于会话凭据，请妥善保管。"));
                 }
             }
 
-            var saveBtn = new Button { Content = "Save & Refresh", Style = (Style)Application.Current.Resources["AccentButtonStyle"], Margin = new Thickness(0, 4, 0, 0) };
+            var saveBtn = new Button { Content = "保存并刷新", Style = (Style)Application.Current.Resources["AccentButtonStyle"], Margin = new Thickness(0, 4, 0, 0) };
             saveBtn.Click += (_, _) =>
             {
                 vm.SaveCommand.Execute(null);
@@ -292,7 +293,7 @@ namespace TaskbarQuota.Views
         {
             button.IsEnabled = false;
             var original = button.Content;
-            button.Content = "Waiting for browser…";
+            button.Content = "正在等待浏览器…";
             try
             {
                 if (id == ProviderId.Claude)
@@ -316,12 +317,12 @@ namespace TaskbarQuota.Views
             var request = TaskbarQuota.Services.ClaudeOAuth.CreateLoginRequest();
             TaskbarQuota.Services.ClaudeOAuth.OpenLoginPage(request);
 
-            button.Content = "Paste code…";
+            button.Content = "粘贴授权码…";
             var code = await PromptForClaudeCodeAsync(button);
             if (string.IsNullOrWhiteSpace(code))
                 throw new OperationCanceledException("Claude login cancelled.");
 
-            button.Content = "Connecting…";
+            button.Content = "正在连接…";
             await TaskbarQuota.Services.ClaudeOAuth.CompleteLoginAsync(request, code);
         }
 
@@ -331,13 +332,13 @@ namespace TaskbarQuota.Views
             {
                 AcceptsReturn = false,
                 MinWidth = 360,
-                PlaceholderText = "Paste Claude code or callback URL",
+                PlaceholderText = "粘贴 Claude 授权码或回调网址",
             };
 
             var panel = new StackPanel { Spacing = 10 };
             panel.Children.Add(new TextBlock
             {
-                Text = "After approving access in Claude, paste the authorization code shown in the browser.",
+                Text = "在 Claude 中批准访问后，粘贴浏览器中显示的授权码。",
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 420,
             });
@@ -345,10 +346,10 @@ namespace TaskbarQuota.Views
 
             var dialog = new ContentDialog
             {
-                Title = "Complete Claude login",
+                Title = "完成 Claude 登录",
                 Content = panel,
-                PrimaryButtonText = "Connect",
-                CloseButtonText = "Cancel",
+                PrimaryButtonText = "连接",
+                CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = owner.XamlRoot,
             };
@@ -376,19 +377,19 @@ namespace TaskbarQuota.Views
         private static ProviderCredentialViewModel CreateCredentialVm(ProviderId id) => id switch
         {
             ProviderId.Copilot => new ProviderCredentialViewModel(id, "GitHub Copilot",
-                "Paste a GitHub token if `gh auth login` is not available.",
+                "如果无法使用 gh auth login，请粘贴 GitHub Token。",
                 CredentialKind.ApiKey, "GITHUB_TOKEN / GH_TOKEN"),
             ProviderId.Cursor => new ProviderCredentialViewModel(id, "Cursor",
-                "Paste a cursor.com Cookie header to override browser detection.",
+                "粘贴 cursor.com Cookie 请求头，以覆盖浏览器自动检测。",
                 CredentialKind.Cookie),
             ProviderId.OpenCode => new ProviderCredentialViewModel(id, "OpenCode",
-                "Paste an opencode.ai Cookie header and optionally enter a Workspace ID (wrk_...).",
+                "粘贴 opencode.ai Cookie 请求头，并可选择填写工作区 ID（wrk_...）。",
                 CredentialKind.Cookie),
             ProviderId.OpenCodeGo => new ProviderCredentialViewModel(id, "OpenCode Go",
-                "Paste your OpenCode Go API key (OPENCODE_API_KEY). It is read automatically from the opencode CLI auth store when you are signed in.",
+                "粘贴 OpenCode Go API 密钥（OPENCODE_API_KEY）。登录后，应用也会从 opencode CLI 凭据存储中自动读取。",
                 CredentialKind.ApiKey, "OPENCODE_API_KEY"),
             ProviderId.Kimi => new ProviderCredentialViewModel(id, "Kimi Code",
-                "Paste your Kimi Code API key (KIMI_CODE_API_KEY) to fetch Coding Plan usage without CLI login.",
+                "粘贴 Kimi Code API 密钥（KIMI_CODE_API_KEY），无需 CLI 登录即可获取 Coding Plan 用量。",
                 CredentialKind.ApiKey, "KIMI_CODE_API_KEY"),
             _ => throw new System.ArgumentException($"No credential fix for {id}", nameof(id)),
         };
@@ -439,7 +440,7 @@ namespace TaskbarQuota.Views
 
             ShareCardHelper.ShowTransientTip(
                 ProviderShareTip,
-                copied ? "Image copied to clipboard" : "Couldn't copy the image",
+                copied ? "图片已复制到剪贴板" : "无法复制图片",
                 ShareProviderButton);
         }
 
@@ -512,7 +513,7 @@ namespace TaskbarQuota.Views
         }
 
         private const string DefaultPinTooltip =
-            "Keep this provider on the taskbar even when another tool is active";
+            "即使其他工具处于活动状态，也将此服务保留在任务栏上";
 
         private void UpdatePinPresentation(ProviderCardViewModel? card)
         {
@@ -523,13 +524,13 @@ namespace TaskbarQuota.Views
                 && _pinHereDisplayKey.Length > 0
                 && WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Taskbar
                 && WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.Adaptive;
-            ProviderPinText.Text = canPinHere ? "Pin here" : card.ProviderPinToggleText;
+            ProviderPinText.Text = canPinHere ? "固定到此处" : card.ProviderPinToggleText;
 
             string? fixedDisplay = WidgetSettingsService.GetPinnedProviderDisplay(card.ProviderId);
             string tooltip = card.IsProviderPinned && fixedDisplay is not null
-                ? $"Pinned to {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}"
+                ? $"已固定到 {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}"
                 : canPinHere
-                    ? $"Pin {card.DisplayName} to {TaskbarWindowTarget.GetDisplayLabel(_pinHereDisplayKey)}"
+                    ? $"将 {card.DisplayName} 固定到 {TaskbarWindowTarget.GetDisplayLabel(_pinHereDisplayKey)}"
                     : DefaultPinTooltip;
             ToolTipService.SetToolTip(ProviderPinToggle, tooltip);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ProviderPinToggle, tooltip);

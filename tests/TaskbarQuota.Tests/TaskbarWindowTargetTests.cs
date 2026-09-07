@@ -52,9 +52,9 @@ public class TaskbarWindowTargetTests
         => Assert.Equal(expected, TaskbarWindowTarget.TryGetDisplayNumber(displayKey));
 
     [Theory]
-    [InlineData("DISPLAY2", "Screen 2")]
-    [InlineData("legacy-monitor-key", "this screen")]
-    [InlineData(WidgetSettingsService.AllDisplaysPinDestination, "all screens")]
+    [InlineData("DISPLAY2", "屏幕 2")]
+    [InlineData("legacy-monitor-key", "当前屏幕")]
+    [InlineData(WidgetSettingsService.AllDisplaysPinDestination, "所有屏幕")]
     public void GetDisplayLabel_never_exposes_internal_display_keys(string displayKey, string expected)
         => Assert.Equal(expected, TaskbarWindowTarget.GetDisplayLabel(displayKey));
 }

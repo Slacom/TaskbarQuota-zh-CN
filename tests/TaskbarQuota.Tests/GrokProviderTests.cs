@@ -71,16 +71,16 @@ public class GrokProviderTests
     public void AdditionalUsage_InCreditsMode_FormatsAsCredits()
     {
         var enabled = new AdditionalUsageSnapshot { Enabled = true, SpentUsd = 200, BudgetUsd = 5000, IsCredits = true };
-        Assert.Equal("Enabled", enabled.StatusText);
-        Assert.Equal("200 / 5000 credits", enabled.SpendText);
+        Assert.Equal("已启用", enabled.StatusText);
+        Assert.Equal("200 / 5000 额度", enabled.SpendText);
 
         var disabled = new AdditionalUsageSnapshot { Enabled = false, SpentUsd = 0, BudgetUsd = 0, IsCredits = true };
-        Assert.Equal("Not enabled", disabled.StatusText);
-        Assert.Equal("0 / 0 credits", disabled.SpendText);
+        Assert.Equal("未启用", disabled.StatusText);
+        Assert.Equal("0 / 0 额度", disabled.SpendText);
 
-        // USD (Copilot) formatting is unchanged.
+        // USD (Copilot) values keep their numeric formatting while the UI unit is localized.
         var usd = new AdditionalUsageSnapshot { Enabled = true, SpentUsd = 1.5, BudgetUsd = 5 };
-        Assert.Equal("$1.50 / $5.00 budget", usd.SpendText);
+        Assert.Equal("$1.50 / $5.00 预算", usd.SpendText);
     }
 
     [Fact]

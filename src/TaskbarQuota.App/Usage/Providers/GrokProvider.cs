@@ -116,7 +116,7 @@ namespace TaskbarQuota.Usage.Providers
                 }
             }
 
-            throw last ?? new ProviderException(ProviderErrorKind.Timeout, "Grok billing request timed out.");
+            throw last ?? new ProviderException(ProviderErrorKind.Timeout, "Grok 计费请求超时。");
         }
 
         private static async Task<BillingSnapshot> FetchBillingOnceAsync(string accessToken, CancellationToken ct)
@@ -130,18 +130,18 @@ namespace TaskbarQuota.Usage.Providers
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
                 // HttpClient.Timeout elapsed (cold start), not a caller cancellation — retry.
-                throw new ProviderException(ProviderErrorKind.Timeout, "Grok billing request timed out.");
+                throw new ProviderException(ProviderErrorKind.Timeout, "Grok 计费请求超时。");
             }
             catch (HttpRequestException)
             {
                 // Cold DNS/TLS/connection failure right after launch — transient, retry.
-                throw new ProviderException(ProviderErrorKind.Timeout, "Grok billing connection not ready.");
+                throw new ProviderException(ProviderErrorKind.Timeout, "Grok 计费连接尚未就绪。");
             }
 
             using (response)
             {
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Grok token expired. Run `grok login`.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Grok Token 已过期，请运行 `grok login`。");
 
             var bodyText = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
@@ -149,8 +149,8 @@ namespace TaskbarQuota.Usage.Providers
             if (!response.IsSuccessStatusCode)
             {
                 if (IsTransientBody(bodyText))
-                    throw new ProviderException(ProviderErrorKind.Timeout, "Grok billing transient timeout.");
-                throw new ProviderException(ProviderErrorKind.Other, $"Grok billing API returned {(int)response.StatusCode}");
+                    throw new ProviderException(ProviderErrorKind.Timeout, "Grok 计费服务暂时超时。");
+                throw new ProviderException(ProviderErrorKind.Other, $"Grok 计费 API 返回状态码 {(int)response.StatusCode}");
             }
 
             using var doc = JsonDocument.Parse(bodyText);
@@ -166,7 +166,7 @@ namespace TaskbarQuota.Usage.Providers
         internal static BillingSnapshot ParseBilling(JsonElement root)
         {
             if (!root.TryGetProperty("config", out var config) || config.ValueKind != JsonValueKind.Object)
-                throw new ProviderException(ProviderErrorKind.Parse, "Grok billing response changed.");
+                throw new ProviderException(ProviderErrorKind.Parse, "Grok 计费响应格式已变化。");
 
             double? used = UnitsValue(config, "used");
             double? limit = UnitsValue(config, "monthlyLimit");
@@ -178,7 +178,7 @@ namespace TaskbarQuota.Usage.Providers
                 // must never be used as the subscription quota.
                 if (!config.TryGetProperty("currentPeriod", out var period)
                     || (period.ValueKind != JsonValueKind.Object && period.ValueKind != JsonValueKind.String))
-                    throw new ProviderException(ProviderErrorKind.Parse, "Grok billing response changed.");
+                    throw new ProviderException(ProviderErrorKind.Parse, "Grok 计费响应格式已变化。");
 
                 double periodPercent = CurrentPeriodPercent(period);
                 DateTimeOffset? periodReset = CurrentPeriodDate(config, period,
@@ -344,7 +344,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (!ProviderInstallDetector.IsInstalled(ProviderId.Grok))
                     throw new ProviderException(ProviderErrorKind.NotInstalled, ProviderInstallDetector.NotInstalledMessage(ProviderId.Grok));
 
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Grok auth.json not found. Run `grok login`.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "未找到 Grok auth.json，请运行 `grok login`。");
             }
 
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
@@ -354,7 +354,7 @@ namespace TaskbarQuota.Usage.Providers
         internal static Credentials ReadCredentials(JsonElement root)
         {
             if (root.ValueKind != JsonValueKind.Object)
-                throw new ProviderException(ProviderErrorKind.Parse, "Grok auth.json is not an object.");
+                throw new ProviderException(ProviderErrorKind.Parse, "Grok auth.json 的内容不是对象。");
 
             JsonElement? oidc = null, legacy = null;
             foreach (var entry in root.EnumerateObject())
@@ -372,7 +372,7 @@ namespace TaskbarQuota.Usage.Providers
 
             var chosen = oidc ?? legacy;
             if (chosen is not { } e)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Grok auth.json contains no usable token. Run `grok login`.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Grok auth.json 中没有可用的 Token，请运行 `grok login`。");
 
             string access = e.GetProperty("key").GetString()!;
             string? email = Str(e, "email");

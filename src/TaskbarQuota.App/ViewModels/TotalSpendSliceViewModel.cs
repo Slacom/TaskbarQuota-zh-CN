@@ -17,7 +17,7 @@ namespace TaskbarQuota.ViewModels
         /// <summary>This provider's share (0-100) of the combined value across all slices.</summary>
         public double SharePercent { get; }
 
-        public string TokensText => $"{Tokens:N0} tok";
+        public string TokensText => $"{Tokens:N0} Token";
         public string CostText => CostUsd.HasValue ? $"${CostUsd.Value:F2}" : "—";
         public string SummaryValueText { get; }
         public string ShareText => $"{SharePercent:0.#}%";
@@ -40,7 +40,7 @@ namespace TaskbarQuota.ViewModels
             Tokens = tokens;
             CostUsd = costUsd;
             SharePercent = sharePercent;
-            SummaryValueText = selectedMetric == "tokens" ? $"{tokens:N0} tokens" : CostText;
+            SummaryValueText = selectedMetric == "tokens" ? $"{tokens:N0} Token" : CostText;
             DotBrush = new SolidColorBrush(ProviderColor(providerId));
         }
 

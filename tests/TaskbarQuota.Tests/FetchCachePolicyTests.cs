@@ -17,6 +17,33 @@ public class FetchCachePolicyTests
         => Assert.Equal(UsageService.SuccessCacheTtl, FetchCachePolicy.TtlForSuccess());
 
     [Fact]
+    public void Snapshot_UsesChinesePendingMessages()
+    {
+        var service = new UsageService();
+
+        var snapshots = service.Snapshot(ProviderId.Codex);
+
+        Assert.Equal("正在加载当前服务…", snapshots.Single(result => result.Id == ProviderId.Codex).Error);
+        Assert.Equal("正在加载…", snapshots.Single(result => result.Id == ProviderId.Claude).Error);
+    }
+
+    [Fact]
+    public async Task FetchAsync_UnexpectedException_ReturnsStableChineseError()
+    {
+        var service = new UsageService();
+        var provider = new FlakyProvider(ProviderId.Kimi)
+        {
+            NextUnexpectedException = new InvalidOperationException("English machine detail should stay out of UI"),
+        };
+        service.Register(provider);
+
+        var result = await service.FetchAsync(ProviderId.Kimi, force: true);
+
+        Assert.False(result.Ok);
+        Assert.Equal("获取用量失败，请稍后重试。", result.Error);
+    }
+
+    [Fact]
     public async Task FetchAsync_RateLimitedAfterSuccess_ReturnsLastSuccessfulLiveResult()
     {
         var service = new UsageService();
@@ -177,13 +204,16 @@ public class FetchCachePolicyTests
 
     private sealed class FlakyProvider : IUsageProvider
     {
+        public FlakyProvider(ProviderId id = ProviderId.Claude) => Id = id;
+
         public ProviderException? NextException { get; set; }
+        public Exception? NextUnexpectedException { get; set; }
         public double? NextPrimaryPercent { get; set; }
         public double? NextSecondaryPercent { get; set; }
         public DateTimeOffset? NextResetAt { get; set; }
         public int FetchCount { get; private set; }
 
-        public ProviderId Id => ProviderId.Claude;
+        public ProviderId Id { get; }
         public string DisplayName => "Claude Code";
         public string SessionLabel => "Session";
         public string WeeklyLabel => "Weekly";
@@ -196,6 +226,11 @@ public class FetchCachePolicyTests
             {
                 NextException = null;
                 throw exception;
+            }
+            if (NextUnexpectedException is { } unexpected)
+            {
+                NextUnexpectedException = null;
+                throw unexpected;
             }
 
             var usage = new UsageSnapshot(new RateWindow(NextPrimaryPercent ?? 42, resetAt: NextResetAt))

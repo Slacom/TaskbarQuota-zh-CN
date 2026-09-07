@@ -97,10 +97,10 @@ namespace TaskbarQuota.Taskbar
         internal static string GetDisplayLabel(string displayKey)
         {
             if (displayKey == WidgetSettingsService.AllDisplaysPinDestination)
-                return "all screens";
+                return "所有屏幕";
 
             int number = TryGetDisplayNumber(displayKey);
-            return number > 0 ? $"Screen {number}" : "this screen";
+            return number > 0 ? $"屏幕 {number}" : "当前屏幕";
         }
 
         internal static string GetDisplayKeyForWindow(IntPtr hwnd)

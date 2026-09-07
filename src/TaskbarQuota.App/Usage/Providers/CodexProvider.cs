@@ -44,10 +44,10 @@ namespace TaskbarQuota.Usage.Providers
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
 
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Codex token expired. Run `codex login`.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Codex 登录凭据已过期，请运行 codex login。");
 
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Codex API returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Codex API 返回状态码 {(int)response.StatusCode}");
 
             double? headerPrimary = TryHeaderF64(response, "x-codex-primary-used-percent");
             double? headerSecondary = TryHeaderF64(response, "x-codex-secondary-used-percent");
@@ -391,7 +391,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (!ProviderInstallDetector.IsInstalled(ProviderId.Codex))
                     throw new ProviderException(ProviderErrorKind.NotInstalled, ProviderInstallDetector.NotInstalledMessage(ProviderId.Codex));
 
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Codex auth.json not found. Run `codex login`.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "未找到 Codex auth.json，请运行 codex login。");
             }
 
             using var doc = JsonDocument.Parse(File.ReadAllText(authPath));
@@ -413,7 +413,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (!string.IsNullOrEmpty(k)) return new Credentials(k!, null);
             }
 
-            throw new ProviderException(ProviderErrorKind.Parse, "Codex auth.json contains no usable token.");
+            throw new ProviderException(ProviderErrorKind.Parse, "Codex auth.json 中没有可用的 Token。");
         }
 
         private static string GetAuthPath()

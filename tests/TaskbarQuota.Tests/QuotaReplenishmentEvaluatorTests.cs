@@ -379,7 +379,7 @@ public class QuotaReplenishmentEvaluatorTests
 
         var titles = QuotaAlertWindowCatalog.Enumerate(result).Select(window => window.Title).ToArray();
 
-        Assert.Equal(["Weekly", "Daily", "Code review", "Monthly"], titles);
+        Assert.Equal(["每周", "每日", "代码审查", "每月"], titles);
     }
 
     [Fact]
@@ -396,7 +396,7 @@ public class QuotaReplenishmentEvaluatorTests
 
         var titles = QuotaAlertWindowCatalog.Enumerate(result).Select(window => window.Title).ToArray();
 
-        Assert.Equal(["Gemini Weekly", "Non-Gemini Weekly", "Gemini 5h", "Non-Gemini 5h"], titles);
+        Assert.Equal(["Gemini 每周", "非 Gemini 每周", "Gemini 5 小时", "非 Gemini 5 小时"], titles);
     }
 
     private static QuotaWindowObservation Observation(

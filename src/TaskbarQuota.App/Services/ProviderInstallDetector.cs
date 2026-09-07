@@ -101,26 +101,26 @@ internal static class ProviderInstallDetector
 
     public static string WaitingMessage(ProviderId id) => id switch
     {
-        ProviderId.Antigravity => "Waiting for Antigravity to be open.",
-        ProviderId.Devin => "Waiting for the Devin app to be open.",
-        ProviderId.Claude => "Waiting for Claude to be open.",
-        ProviderId.Cursor => "Waiting for Cursor to be open.",
-        _ => "Waiting for the app to be open.",
+        ProviderId.Antigravity => "正在等待 Antigravity 启动。",
+        ProviderId.Devin => "正在等待 Devin 应用启动。",
+        ProviderId.Claude => "正在等待 Claude 启动。",
+        ProviderId.Cursor => "正在等待 Cursor 启动。",
+        _ => "正在等待应用启动。",
     };
 
     public static string NotInstalledMessage(ProviderId id) => id switch
     {
-        ProviderId.Antigravity => "Install Antigravity to see usage here.",
-        ProviderId.Grok => "Install the Grok CLI and run grok login.",
-        ProviderId.Devin => "Install the Devin CLI or app, then sign in.",
-        ProviderId.Codex => "Install the Codex CLI and run codex login.",
-        ProviderId.Claude => "Open Claude in your browser, or install the Claude CLI/app and sign in.",
-        ProviderId.Copilot => "Install the GitHub CLI or add a token in Settings.",
-        ProviderId.Cursor => "Install Cursor and sign in.",
-        ProviderId.OpenCode => "Sign in at opencode.ai or paste cookies via Fix.",
-        ProviderId.OpenCodeGo => "Sign in to OpenCode Go or set OPENCODE_API_KEY.",
-        ProviderId.Cline or ProviderId.ClinePass => "Install the Cline CLI (npm i -g cline) and sign in.",
-        _ => "Set up this provider to see usage here.",
+        ProviderId.Antigravity => "请安装 Antigravity，以便在此查看用量。",
+        ProviderId.Grok => "请安装 Grok CLI 并运行 grok login。",
+        ProviderId.Devin => "请安装 Devin CLI 或应用，然后登录。",
+        ProviderId.Codex => "请安装 Codex CLI 并运行 codex login。",
+        ProviderId.Claude => "请在浏览器中打开 Claude，或安装 Claude CLI/应用并登录。",
+        ProviderId.Copilot => "请安装 GitHub CLI，或在设置中添加 Token。",
+        ProviderId.Cursor => "请安装 Cursor 并登录。",
+        ProviderId.OpenCode => "请登录 opencode.ai，或通过“修复”粘贴 Cookie。",
+        ProviderId.OpenCodeGo => "请登录 OpenCode Go，或设置 OPENCODE_API_KEY。",
+        ProviderId.Cline or ProviderId.ClinePass => "请安装 Cline CLI（npm i -g cline）并登录。",
+        _ => "请设置此服务，以便在此查看用量。",
     };
 
     internal static string ClineProvidersPath()

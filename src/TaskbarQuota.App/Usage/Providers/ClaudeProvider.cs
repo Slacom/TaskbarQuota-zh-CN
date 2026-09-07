@@ -50,7 +50,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (freshLogin != null && ClaudeOAuth.WasStoreWrittenAfter(ProcessStartedAt))
                     return await FetchWithOAuthTokenAsync(freshLogin, ct).ConfigureAwait(false);
 
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Login with Claude required.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "需要登录 Claude。");
             }
 
             if (ShouldPreferWebUsage() && await TryFetchWebUsageAsync(ct).ConfigureAwait(false) is { } preferredWeb)
@@ -74,7 +74,7 @@ namespace TaskbarQuota.Usage.Providers
                     return webOnlyResult;
 
                 // Nothing readable — prompt the one-click login (works on any browser, no CLI).
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Login with Claude required.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "需要登录 Claude。");
             }
 
             if (IsOAuthRateLimited())
@@ -82,7 +82,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (await TryFetchWebUsageAsync(ct).ConfigureAwait(false) is { } webResult)
                     return webResult;
 
-                throw new ProviderException(ProviderErrorKind.RateLimited, "Claude API rate limited. Will retry in a few minutes.");
+                throw new ProviderException(ProviderErrorKind.RateLimited, "Claude API 请求频率受限，几分钟后将重试。");
             }
 
             using var response = await SendUsageRequestAsync(creds.AccessToken, ct).ConfigureAwait(false);
@@ -96,7 +96,7 @@ namespace TaskbarQuota.Usage.Providers
                     return await HandleUsageResponseAsync(retry, refreshed, ct).ConfigureAwait(false);
                 }
 
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth token expired. Run `claude` to re-authenticate.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth Token 已过期，请运行 `claude` 重新认证。");
             }
 
             return await HandleUsageResponseAsync(response, creds, ct).ConfigureAwait(false);
@@ -109,7 +109,7 @@ namespace TaskbarQuota.Usage.Providers
             if (resp.StatusCode == HttpStatusCode.Unauthorized)
             {
                 Services.ClaudeOAuth.Logout(); // token dead and refresh already failed upstream
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Login with Claude required.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "需要登录 Claude。");
             }
             return await HandleUsageResponseAsync(resp, creds, ct).ConfigureAwait(false);
         }
@@ -133,10 +133,10 @@ namespace TaskbarQuota.Usage.Providers
                     return webResult;
 
                 throw new ProviderException(ProviderErrorKind.RateLimited,
-                    $"Claude API rate limited ({(int)response.StatusCode}). Will retry in a few minutes.");
+                    $"Claude API 请求频率受限（状态码 {(int)response.StatusCode}），几分钟后将重试。");
             }
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Claude API returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Claude API 返回状态码 {(int)response.StatusCode}");
 
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
@@ -538,7 +538,7 @@ namespace TaskbarQuota.Usage.Providers
                 }
             }
 
-            throw new ProviderException(ProviderErrorKind.Parse, "Claude web API did not return an organization id.");
+            throw new ProviderException(ProviderErrorKind.Parse, "Claude Web API 未返回组织 ID。");
         }
 
         private static string? FindOrganizationId(JsonElement account)
@@ -565,9 +565,9 @@ namespace TaskbarQuota.Usage.Providers
 
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude web cookies expired.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude Web Cookie 已过期。");
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"{label} returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"{label} 返回状态码 {(int)response.StatusCode}");
 
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             return JsonDocument.Parse(text);
@@ -706,7 +706,7 @@ namespace TaskbarQuota.Usage.Providers
                 throw new ProviderException(ProviderErrorKind.NotRunning, ProviderInstallDetector.WaitingMessage(ProviderId.Claude));
             }
 
-            throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth access token missing. Run `claude` to authenticate.");
+            throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Claude OAuth 访问 Token，请运行 `claude` 完成认证。");
         }
 
         /// <summary>Reads the CLI credentials file; returns null when it is absent or holds an empty token.</summary>
@@ -731,7 +731,7 @@ namespace TaskbarQuota.Usage.Providers
 
             string? access = oauth.TryGetProperty("accessToken", out var at) ? at.GetString() : null;
             if (string.IsNullOrEmpty(access))
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth access token missing. Run `claude` to authenticate.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Claude OAuth 访问 Token，请运行 `claude` 完成认证。");
 
             string? tier = oauth.TryGetProperty("rateLimitTier", out var rt) ? rt.GetString() : null;
             string? subType = oauth.TryGetProperty("subscriptionType", out var st) ? st.GetString() : null;

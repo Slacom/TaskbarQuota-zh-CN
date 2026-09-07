@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using TaskbarQuota.Diagnostics;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.Services;
@@ -328,29 +329,29 @@ internal static class QuotaAlertWindowCatalog
             if (string.IsNullOrWhiteSpace(extra.Id) || duplicateExtraIds.Contains(extra.Id))
                 continue;
 
-            yield return new QuotaAlertWindow($"extra:{extra.Id}", extra.Title, extra.Window);
+            yield return new QuotaAlertWindow($"extra:{extra.Id}", UiText.TranslateLabel(extra.Title), extra.Window);
         }
     }
 
     private static string PrimaryTitle(UsageResult result, RateWindow window)
         => result.Id == ProviderId.Antigravity
-            ? "Gemini Weekly"
-            : window.Label ?? result.Provider?.SessionLabel ?? "Session";
+            ? "Gemini 每周"
+            : UiText.TranslateLabel(window.Label ?? result.Provider?.SessionLabel ?? "Session");
 
     private static string SecondaryTitle(UsageResult result, RateWindow window)
         => result.Id == ProviderId.Antigravity
-            ? "Non-Gemini Weekly"
-            : window.Label ?? result.Provider?.WeeklyLabel ?? "Weekly";
+            ? "非 Gemini 每周"
+            : UiText.TranslateLabel(window.Label ?? result.Provider?.WeeklyLabel ?? "Weekly");
 
     private static string ModelTitle(ProviderId provider, RateWindow window)
-        => window.Label ?? (provider switch
+        => UiText.TranslateLabel(window.Label ?? (provider switch
         {
-            ProviderId.Antigravity => "Gemini 5h",
-            ProviderId.Cursor => "API Usage",
-            ProviderId.Copilot => "Completions",
+            ProviderId.Antigravity => "Gemini 5 小时",
+            ProviderId.Cursor => "API 用量",
+            ProviderId.Copilot => "代码补全",
             _ => "Model",
-        });
+        }));
 
     private static string MonthlyTitle(ProviderId provider, RateWindow window)
-        => window.Label ?? (provider == ProviderId.Antigravity ? "Non-Gemini 5h" : "Monthly");
+        => UiText.TranslateLabel(window.Label ?? (provider == ProviderId.Antigravity ? "非 Gemini 5 小时" : "Monthly"));
 }

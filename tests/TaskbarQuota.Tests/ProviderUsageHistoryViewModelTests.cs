@@ -32,10 +32,10 @@ namespace TaskbarQuota.Tests
             Assert.Equal(30, viewModel.TrendPoints.Count);
             Assert.Equal(new DateTime(2026, 7, 12), viewModel.TrendPoints[0].Date);
             Assert.Equal(1_500_000UL, viewModel.TrendPoints[^2].Tokens);
-            Assert.Equal("$1.25 · 1.5M tokens", viewModel.Periods[0].Reading);
-            Assert.Equal("0 tokens", viewModel.Periods[1].Reading);
-            Assert.Equal("$349.92 · 2B tokens", viewModel.Periods[2].Reading);
-            Assert.Contains("Peak 1.5M tokens", viewModel.TrendAutomationName, StringComparison.Ordinal);
+            Assert.Equal("$1.25 · 1.5M Token", viewModel.Periods[0].Reading);
+            Assert.Equal("0 Token", viewModel.Periods[1].Reading);
+            Assert.Equal("$349.92 · 2B Token", viewModel.Periods[2].Reading);
+            Assert.Contains("峰值为 8月9日 的 1.5M Token", viewModel.TrendAutomationName, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -54,9 +54,9 @@ namespace TaskbarQuota.Tests
         {
             var row = new ProviderUsagePeriodRowViewModel("Today", new UsagePeriod(35_400_000, null, estimateComplete: false));
 
-            Assert.Equal("35.4M tokens", row.Reading);
+            Assert.Equal("35.4M Token", row.Reading);
             Assert.DoesNotContain('$', row.Reading);
-            Assert.Contains("cost unavailable", row.TooltipText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("成本不可用", row.TooltipText, StringComparison.Ordinal);
         }
 
         [Fact]

@@ -116,12 +116,12 @@ public static class PinBudgetService
         var pinned = PinnedProviders();
         string name = ProviderName(provider);
         bool floating = WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Floating;
-        string surfaceNoun = floating ? "floating widget" : "taskbar";
+        string surfaceNoun = floating ? "悬浮小组件" : "任务栏";
 
         if (pinned.Count >= UsageCoordinator.MaxDisplayedWidgetTiles)
         {
-            reason = $"The {surfaceNoun} can show at most {UsageCoordinator.MaxDisplayedWidgetTiles} quota providers at once, and you already "
-                + $"have {string.Join(", ", pinned.Select(ProviderName))} pinned. Unpin one of those to make room for {name}.";
+            reason = $"{surfaceNoun}最多同时显示 {UsageCoordinator.MaxDisplayedWidgetTiles} 个额度服务，而你已经固定了 "
+                + $"{string.Join("、", pinned.Select(ProviderName))}。请取消固定其中一个，为 {name} 腾出位置。";
             return false;
         }
 
@@ -137,13 +137,10 @@ public static class PinBudgetService
                 + $"available={available}");
 
             reason = floating
-                ? $"There isn't room in the floating widget for {name} ({Describe(provider)}) next to "
-                  + $"{string.Join(" and ", pinned.Select(p => $"{ProviderName(p)} ({Describe(p)})"))}. "
-                  + $"Turn off some rows for {name} or for a pinned provider, or unpin one."
-                : $"There isn't room on the taskbar for {name} ({Describe(provider)}) next to "
-                  + $"{string.Join(" and ", pinned.Select(p => $"{ProviderName(p)} ({Describe(p)})"))}. "
-                  + $"Turn off some rows for {name} or for a pinned provider, unpin one, or set the Windows "
-                  + "taskbar to left alignment — that frees up a lot more room.";
+                ? $"悬浮小组件没有足够空间在 {string.Join("、", pinned.Select(p => $"{ProviderName(p)}（{Describe(p)}）"))} 旁显示 {name}（{Describe(provider)}）。"
+                  + $"请关闭 {name} 或已固定服务的部分用量行，或者取消固定一个服务。"
+                : $"任务栏没有足够空间在 {string.Join("、", pinned.Select(p => $"{ProviderName(p)}（{Describe(p)}）"))} 旁显示 {name}（{Describe(provider)}）。"
+                  + $"请关闭 {name} 或已固定服务的部分用量行、取消固定一个服务，或将 Windows 任务栏改为左对齐以释放更多空间。";
             return false;
         }
 
@@ -154,7 +151,7 @@ public static class PinBudgetService
     private static string Describe(ProviderId provider)
     {
         int rows = RowCount(provider);
-        return rows == 1 ? "1 row" : $"{rows} rows";
+        return $"{rows} 行";
     }
 
     /// <summary>

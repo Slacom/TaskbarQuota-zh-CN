@@ -895,7 +895,7 @@ namespace TaskbarQuota
             else if (_service.TryGetLastSuccessfulLiveResult(target, out var lastSuccess))
                 snapshot = lastSuccess.WithSource(SourceFor(target));
             else if (_service.Get(target) is { } provider)
-                snapshot = UsageResult.Pending(target, provider, "Loading...").WithSource(SourceFor(target));
+                snapshot = UsageResult.Pending(target, provider, "正在加载…").WithSource(SourceFor(target));
             else
                 return;
 

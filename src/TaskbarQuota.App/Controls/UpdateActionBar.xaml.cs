@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Services;
 using Windows.System;
 
@@ -91,7 +92,7 @@ public sealed partial class UpdateActionBar : UserControl
     switch (_updates.UiState)
     {
       case UpdateAvailabilityUiState.UpdateAvailable:
-        StatusText.Text = _updates.StatusMessage ?? "New update available!";
+        StatusText.Text = _updates.StatusMessage ?? UiText.Get("New update available!");
         DetailText.Visibility = Visibility.Collapsed;
         BusyRing.Visibility = Visibility.Collapsed;
         BusyRing.IsActive = false;
@@ -99,14 +100,14 @@ public sealed partial class UpdateActionBar : UserControl
         ActionButton.Visibility = Visibility.Visible;
         ActionButton.IsEnabled = true;
         ActionButton.Content = _updates.AvailableUpdate?.DeliveryChannel == UpdateDeliveryChannel.MicrosoftStore
-            ? "Open Store"
+            ? "打开 Microsoft Store"
             : _updates.AvailableUpdate?.DownloadUrl is null
-                ? "View release"
-                : "Download update";
+                ? "查看发布页面"
+                : "下载更新";
         break;
 
       case UpdateAvailabilityUiState.Downloading:
-        StatusText.Text = _updates.StatusMessage ?? "Downloading update…";
+        StatusText.Text = _updates.StatusMessage ?? "正在下载更新…";
         BusyRing.Visibility = Visibility.Collapsed;
         ActionButton.Visibility = Visibility.Collapsed;
         DownloadProgress.Visibility = Visibility.Visible;
@@ -114,13 +115,13 @@ public sealed partial class UpdateActionBar : UserControl
         break;
 
       case UpdateAvailabilityUiState.ReadyToInstall:
-        StatusText.Text = _updates.StatusMessage ?? "New update available! Install now.";
+        StatusText.Text = _updates.StatusMessage ?? "有可用更新！现在可以安装。";
         DetailText.Visibility = Visibility.Collapsed;
         BusyRing.Visibility = Visibility.Collapsed;
         DownloadProgress.Visibility = Visibility.Collapsed;
         ActionButton.Visibility = Visibility.Visible;
         ActionButton.IsEnabled = true;
-        ActionButton.Content = "Install update";
+        ActionButton.Content = UiText.Get("Install update");
         break;
 
       default:
@@ -137,21 +138,21 @@ public sealed partial class UpdateActionBar : UserControl
   {
     Visibility = Visibility.Visible;
     StatusText.Text = _updates.UpToDateSummary
-        ?? "Check for updates on GitHub when you are ready.";
+        ?? "需要时可在 GitHub 上检查更新。";
     DetailText.Visibility = Visibility.Collapsed;
     BusyRing.Visibility = Visibility.Collapsed;
     BusyRing.IsActive = false;
     DownloadProgress.Visibility = Visibility.Collapsed;
     ActionButton.Visibility = Visibility.Visible;
     ActionButton.IsEnabled = true;
-    ActionButton.Content = "Check for updates";
+    ActionButton.Content = "检查更新";
     ActionButton.ClearValue(StyleProperty);
   }
 
   private void ApplySettingsChecking()
   {
     Visibility = Visibility.Visible;
-    StatusText.Text = "Checking for updates…";
+    StatusText.Text = "正在检查更新…";
     DetailText.Visibility = Visibility.Collapsed;
     BusyRing.Visibility = Visibility.Visible;
     BusyRing.IsActive = true;
@@ -216,7 +217,7 @@ public sealed partial class UpdateActionBar : UserControl
     else
     {
       DownloadProgress.IsIndeterminate = true;
-      DetailText.Text = $"{FormatByteSize(progress.BytesReceived)} downloaded";
+      DetailText.Text = $"已下载 {FormatByteSize(progress.BytesReceived)}";
       DetailText.Visibility = Visibility.Visible;
     }
   }

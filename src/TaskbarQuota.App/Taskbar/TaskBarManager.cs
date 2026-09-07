@@ -782,7 +782,7 @@ namespace TaskbarQuota.Taskbar
             if (coordinator.Service.TryGetLastSuccessfulLiveResult(provider, out var lastSuccess))
                 return lastSuccess;
             if (coordinator.Service.Get(provider) is { } usageProvider)
-                return UsageResult.Pending(provider, usageProvider, "Loading...");
+                return UsageResult.Pending(provider, usageProvider, "正在加载…");
             return null;
         }
 

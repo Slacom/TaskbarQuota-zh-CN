@@ -19,28 +19,28 @@ namespace TaskbarQuota.ViewModels
         [ObservableProperty] public partial bool IsLoading { get; set; }
         [ObservableProperty] public partial Visibility IsLoadingVisibility { get; private set; } = Visibility.Collapsed;
         [ObservableProperty] public partial Visibility EmptyVisibility { get; private set; } = Visibility.Collapsed;
-        [ObservableProperty] public partial string HeadlineLabel { get; private set; } = "Raw token cost";
+        [ObservableProperty] public partial string HeadlineLabel { get; private set; } = "Token 原始成本";
         [ObservableProperty] public partial string FormattedCenterValue { get; private set; } = "$0.00";
-        [ObservableProperty] public partial string HeadlineDetail { get; private set; } = "* if billed at full API rate";
+        [ObservableProperty] public partial string HeadlineDetail { get; private set; } = "* 按完整 API 费率估算";
         [ObservableProperty] public partial string RingCenterValue { get; private set; } = "$0.00";
-        [ObservableProperty] public partial string RingCenterUnit { get; private set; } = "API estimate";
-        [ObservableProperty] public partial string RingTooltip { get; private set; } = "Raw token cost: $0.00";
-        [ObservableProperty] public partial string RingAutomationName { get; private set; } = "Raw token cost, $0.00";
+        [ObservableProperty] public partial string RingCenterUnit { get; private set; } = "API 估算";
+        [ObservableProperty] public partial string RingTooltip { get; private set; } = "Token 原始成本：$0.00";
+        [ObservableProperty] public partial string RingAutomationName { get; private set; } = "Token 原始成本，$0.00";
         [ObservableProperty] public partial string PeriodSubtitle { get; private set; } = string.Empty;
-        [ObservableProperty] public partial string ChartTitle { get; private set; } = "Daily cost";
+        [ObservableProperty] public partial string ChartTitle { get; private set; } = "每日成本";
         [ObservableProperty] public partial Visibility ModelBreakdownVisibility { get; private set; } = Visibility.Visible;
         [ObservableProperty] public partial Visibility DayBreakdownVisibility { get; private set; } = Visibility.Collapsed;
 
         [ObservableProperty] public partial string TotalTokensText { get; private set; } = "0";
-        [ObservableProperty] public partial string TotalTokensDetail { get; private set; } = "0 per active day";
+        [ObservableProperty] public partial string TotalTokensDetail { get; private set; } = "活跃日均 0";
         [ObservableProperty] public partial string CachedInputText { get; private set; } = "0";
-        [ObservableProperty] public partial string CachedInputDetail { get; private set; } = "0% of observed input";
+        [ObservableProperty] public partial string CachedInputDetail { get; private set; } = "占已观测输入的 0%";
         [ObservableProperty] public partial string UncachedInputText { get; private set; } = "0";
-        [ObservableProperty] public partial string UncachedInputDetail { get; private set; } = "0 cache writes";
+        [ObservableProperty] public partial string UncachedInputDetail { get; private set; } = "0 次缓存写入";
         [ObservableProperty] public partial string OutputText { get; private set; } = "0";
-        [ObservableProperty] public partial string OutputDetail { get; private set; } = "includes 0 reasoning";
+        [ObservableProperty] public partial string OutputDetail { get; private set; } = "包含 0 个推理 Token";
         [ObservableProperty] public partial string CacheSavingsText { get; private set; } = "$0.00";
-        [ObservableProperty] public partial string CacheSavingsDetail { get; private set; } = "vs full input rates";
+        [ObservableProperty] public partial string CacheSavingsDetail { get; private set; } = "相对于完整输入费率";
         [ObservableProperty] public partial IReadOnlyList<UsageChartDayViewModel> ChartDays { get; private set; } = Array.Empty<UsageChartDayViewModel>();
 
         public ObservableCollection<TotalSpendSliceViewModel> ProviderSlices { get; } = new();
@@ -129,7 +129,7 @@ namespace TaskbarQuota.ViewModels
             var days = DaysInPeriod(SelectedPeriod);
             var until = DateTime.Today;
             var since = until.AddDays(-(days - 1));
-            PeriodSubtitle = days == 1 ? $"Today · {until:MMM d}" : $"{since:MMM d} to {until:MMM d}";
+            PeriodSubtitle = days == 1 ? $"今天 · {until:M月d日}" : $"{since:M月d日} 至 {until:M月d日}";
 
             var providerPeriods = new List<(UsageResult Result, UsagePeriod Period)>();
             foreach (var item in histories)
@@ -151,31 +151,31 @@ namespace TaskbarQuota.ViewModels
             var observedInput = totalBreakdown.Input + totalBreakdown.CacheRead;
             var cachedShare = observedInput == 0 ? 0 : (double)totalBreakdown.CacheRead / observedInput;
 
-            HeadlineLabel = SelectedMetric == "tokens" ? "Processed tokens" : "Raw token cost";
+            HeadlineLabel = SelectedMetric == "tokens" ? "已处理 Token" : "Token 原始成本";
             FormattedCenterValue = SelectedMetric == "tokens" ? $"{totalTokens:N0}" : $"${totalCost:F2}";
             HeadlineDetail = SelectedMetric == "tokens"
-                ? $"Input, cache reads and output across {sessions:N0} sessions."
-                : "API-equivalent estimate; subscription billing may differ";
+                ? $"{sessions:N0} 次会话中的输入、缓存读取和输出。"
+                : "API 等值估算；可能与订阅计费不同";
             RingCenterValue = SelectedMetric == "tokens"
                 ? FormatCompactValue(totalTokens)
                 : FormatCompactCost(totalCost);
-            RingCenterUnit = SelectedMetric == "tokens" ? "tokens" : "API estimate";
-            RingTooltip = $"{HeadlineLabel}: {FormattedCenterValue}{Environment.NewLine}{HeadlineDetail}";
-            RingAutomationName = $"{HeadlineLabel}, {FormattedCenterValue}. {PeriodSubtitle}.";
-            ChartTitle = SelectedMetric == "tokens" ? "Daily processed tokens" : "Daily cost";
+            RingCenterUnit = SelectedMetric == "tokens" ? "Token" : "API 估算";
+            RingTooltip = $"{HeadlineLabel}：{FormattedCenterValue}{Environment.NewLine}{HeadlineDetail}";
+            RingAutomationName = $"{HeadlineLabel}，{FormattedCenterValue}。{PeriodSubtitle}。";
+            ChartTitle = SelectedMetric == "tokens" ? "每日已处理 Token" : "每日成本";
 
             TotalTokensText = $"{totalTokens:N0}";
-            TotalTokensDetail = $"{dailyAverage:N0} per active day";
+            TotalTokensDetail = $"活跃日均 {dailyAverage:N0}";
             CachedInputText = $"{totalBreakdown.CacheRead:N0}";
-            CachedInputDetail = $"{cachedShare:P1} of observed input";
+            CachedInputDetail = $"占已观测输入的 {cachedShare:P1}";
             UncachedInputText = $"{totalBreakdown.Input:N0}";
-            UncachedInputDetail = $"{totalBreakdown.CacheWrite:N0} cache writes";
+            UncachedInputDetail = $"{totalBreakdown.CacheWrite:N0} 次缓存写入";
             OutputText = $"{totalBreakdown.Output:N0}";
-            OutputDetail = $"includes {totalBreakdown.Reasoning:N0} reasoning";
+            OutputDetail = $"包含 {totalBreakdown.Reasoning:N0} 个推理 Token";
             CacheSavingsText = $"${cacheSavings:F2}";
             CacheSavingsDetail = totalCost > 0
-                ? $"{cacheSavings / totalCost:F1}x raw token cost"
-                : "vs full input rates";
+                ? $"相当于 Token 原始成本的 {cacheSavings / totalCost:F1} 倍"
+                : "相对于完整输入费率";
 
             BuildProviderSlices(providerPeriods, totalCost, totalTokens);
             BuildChart(dayLookup, since, until);
@@ -348,13 +348,13 @@ namespace TaskbarQuota.ViewModels
 
         private void ResetEmpty()
         {
-            HeadlineLabel = "Raw token cost";
+            HeadlineLabel = "Token 原始成本";
             FormattedCenterValue = "$0.00";
-            HeadlineDetail = "No local provider usage history found";
+            HeadlineDetail = "未找到本地服务使用记录";
             RingCenterValue = "$0.00";
-            RingCenterUnit = "API estimate";
-            RingTooltip = "Raw token cost: $0.00";
-            RingAutomationName = "Raw token cost, $0.00. No local provider usage history found.";
+            RingCenterUnit = "API 估算";
+            RingTooltip = "Token 原始成本：$0.00";
+            RingAutomationName = "Token 原始成本，$0.00。未找到本地服务使用记录。";
             ChartDays = Array.Empty<UsageChartDayViewModel>();
         }
     }
@@ -399,7 +399,7 @@ namespace TaskbarQuota.ViewModels
         {
             ProviderName = provider;
             ModelName = model;
-            CostText = cost.HasValue ? $"${cost.Value:F2}" : "Not priced";
+            CostText = cost.HasValue ? $"${cost.Value:F2}" : "无定价";
             ShareText = cost.HasValue && totalCost > 0 ? $"{cost.Value / totalCost:P1}" : "—";
             TokensText = $"{tokens:N0}";
         }
@@ -412,7 +412,7 @@ namespace TaskbarQuota.ViewModels
         public string TokensText { get; }
         public CombinedDayUsageItemViewModel(DateTime day, ulong tokens, double cost)
         {
-            DayText = day.ToString("MMM d", CultureInfo.CurrentCulture);
+            DayText = day.ToString("M月d日", CultureInfo.GetCultureInfo("zh-CN"));
             CostText = $"${cost:F2}";
             TokensText = $"{tokens:N0}";
         }

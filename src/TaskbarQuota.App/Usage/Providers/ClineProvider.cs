@@ -189,9 +189,9 @@ namespace TaskbarQuota.Usage.Providers
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 throw new ProviderException(ProviderErrorKind.AuthRequired,
-                    "Cline sign-in expired. Run `cline auth login` or sign in to the Cline app.");
+                    "Cline 登录已过期，请运行 `cline auth login` 或在 Cline 应用中登录。");
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Cline API returned {(int)response.StatusCode}.");
+                throw new ProviderException(ProviderErrorKind.Other, $"Cline API 返回状态码 {(int)response.StatusCode}。");
 
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(text);
@@ -207,7 +207,7 @@ namespace TaskbarQuota.Usage.Providers
 
             if (string.IsNullOrEmpty(auth.RefreshToken))
                 throw new ProviderException(ProviderErrorKind.AuthRequired,
-                    "Cline sign-in expired. Run `cline auth login` or sign in to the Cline app.");
+                    "Cline 登录已过期，请运行 `cline auth login` 或在 Cline 应用中登录。");
 
             var refreshed = await RefreshAsync(auth.RefreshToken, ct).ConfigureAwait(false);
             return EnsureWorkOsPrefix(refreshed);
@@ -224,7 +224,7 @@ namespace TaskbarQuota.Usage.Providers
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 throw new ProviderException(ProviderErrorKind.AuthRequired,
-                    "Cline sign-in expired. Run `cline auth login` or sign in to the Cline app.");
+                    "Cline 登录已过期，请运行 `cline auth login` 或在 Cline 应用中登录。");
 
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(text);
@@ -235,7 +235,7 @@ namespace TaskbarQuota.Usage.Providers
                 return token;
             }
 
-            throw new ProviderException(ProviderErrorKind.AuthRequired, "Cline token refresh returned no access token.");
+            throw new ProviderException(ProviderErrorKind.AuthRequired, "刷新 Cline Token 后未返回访问 Token。");
         }
 
         private static string EnsureWorkOsPrefix(string token)
@@ -380,7 +380,7 @@ namespace TaskbarQuota.Usage.Providers
                     ProviderInstallDetector.NotInstalledMessage(ProviderId.Cline));
 
             return new ProviderException(ProviderErrorKind.AuthRequired,
-                "Cline sign-in not found. Run `cline auth login` or sign in to the Cline app.");
+                "未找到 Cline 登录信息，请运行 `cline auth login` 或在 Cline 应用中登录。");
         }
     }
 
@@ -402,7 +402,7 @@ namespace TaskbarQuota.Usage.Providers
 
             var limits = await ClineAccount.GetJsonAsync("/api/v1/users/me/plan/usage-limits", bearer, ct).ConfigureAwait(false);
             if (!ClineAccount.TryBuildUsage(limits, out var usage))
-                throw new ProviderException(ProviderErrorKind.Parse, "No active ClinePass subscription.");
+                throw new ProviderException(ProviderErrorKind.Parse, "未检测到有效的 ClinePass 订阅。");
 
             usage.LoginMethod = await ClineAccount.TryGetPlanNameAsync(bearer, ct).ConfigureAwait(false);
             usage.Email = auth.Email;
@@ -430,7 +430,7 @@ namespace TaskbarQuota.Usage.Providers
 
             double? balance = await ClineAccount.TryGetBalanceAsync(auth, bearer, ct).ConfigureAwait(false);
             if (balance is null)
-                throw new ProviderException(ProviderErrorKind.Parse, "Cline credit balance unavailable. Try again later.");
+                throw new ProviderException(ProviderErrorKind.Parse, "暂时无法获取 Cline 额度余额，请稍后重试。");
 
             // Credits-only card: no percent windows, just the remaining pay-as-you-go balance.
             var usage = new UsageSnapshot(new RateWindow(0))

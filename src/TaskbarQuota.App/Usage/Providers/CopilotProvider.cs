@@ -40,9 +40,9 @@ namespace TaskbarQuota.Usage.Providers
 
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "GitHub token cannot read Copilot usage. Run `gh auth login` or add a GitHub token in Settings.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "GitHub Token 无权读取 Copilot 用量。请运行 `gh auth login`，或在设置中添加 GitHub Token。");
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"GitHub Copilot API returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"GitHub Copilot API 返回状态码 {(int)response.StatusCode}");
 
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
@@ -294,7 +294,7 @@ namespace TaskbarQuota.Usage.Providers
                 // Fall through to a provider-friendly setup message.
             }
 
-            throw new ProviderException(ProviderErrorKind.AuthRequired, "GitHub auth not found. Run `gh auth login`, or paste a GitHub token in Settings.");
+            throw new ProviderException(ProviderErrorKind.AuthRequired, "未找到 GitHub 登录信息。请运行 `gh auth login`，或在设置中粘贴 GitHub Token。");
         }
 
         private static string ResolvePlanName(JsonElement root)

@@ -8,6 +8,7 @@ using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 using TaskbarQuota.Diagnostics;
 using TaskbarQuota.Usage;
+using TaskbarQuota.Localization;
 
 namespace TaskbarQuota.Services;
 
@@ -263,16 +264,16 @@ internal static class QuotaAlertEvaluator
     private static IEnumerable<QuotaAlertWindow> EnumerateWindows(UsageSnapshot usage)
     {
         if (usage.HasPrimaryWindow)
-            yield return new QuotaAlertWindow("primary", "Session", usage.Primary);
+            yield return new QuotaAlertWindow("primary", UiText.Get("Session"), usage.Primary);
 
         if (usage.Secondary is { } secondary)
-            yield return new QuotaAlertWindow("secondary", "Weekly", secondary);
+            yield return new QuotaAlertWindow("secondary", UiText.Get("Weekly"), secondary);
 
         if (usage.ModelSpecific is { } model)
-            yield return new QuotaAlertWindow("model", "Model", model);
+            yield return new QuotaAlertWindow("model", UiText.Get("Model"), model);
 
         if (usage.Monthly is { } monthly)
-            yield return new QuotaAlertWindow("monthly", "Monthly", monthly);
+            yield return new QuotaAlertWindow("monthly", UiText.Get("Monthly"), monthly);
 
         foreach (var extra in usage.ExtraRateWindows)
             yield return new QuotaAlertWindow($"extra:{extra.Id}", extra.Title, extra.Window);
@@ -353,34 +354,34 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
         if (replenishments.Count == 1)
         {
             var replenishment = replenishments[0];
-            var window = replenishment.Current.Title.ToLowerInvariant();
+            var window = UiText.TranslateLabel(replenishment.Current.Title);
             var verb = replenishment.Kind switch
             {
-                QuotaReplenishmentKind.ConfirmedCycleRenewal => "renewed",
-                QuotaReplenishmentKind.FullReplenishment => "replenished",
-                _ => "increased",
+                QuotaReplenishmentKind.ConfirmedCycleRenewal => "已刷新",
+                QuotaReplenishmentKind.FullReplenishment => "已恢复",
+                _ => "已增加",
             };
             var body = replenishment.Kind == QuotaReplenishmentKind.FullReplenishment
-                ? "Available quota is now 100%."
-                : $"Available quota increased from {FormatPercent(replenishment.Previous.AvailablePercent)}% " +
-                  $"to {FormatPercent(replenishment.Current.AvailablePercent)}%.";
+                ? "当前可用额度为 100%。"
+                : $"可用额度从 {FormatPercent(replenishment.Previous.AvailablePercent)}% " +
+                  $"增加到 {FormatPercent(replenishment.Current.AvailablePercent)}%。";
 
             return new QuotaAlertNotification(
-                $"{providerName} {window} quota {verb}",
+                $"{providerName} {window}额度{verb}",
                 body);
         }
 
         var lines = replenishments
             .Take(3)
             .Select(item =>
-                $"{item.Current.Title}: {FormatPercent(item.Previous.AvailablePercent)}% " +
-                $"→ {FormatPercent(item.Current.AvailablePercent)}% available.")
+                $"{UiText.TranslateLabel(item.Current.Title)}：{FormatPercent(item.Previous.AvailablePercent)}% " +
+                $"→ 可用 {FormatPercent(item.Current.AvailablePercent)}%")
             .ToList();
         if (replenishments.Count > 3)
-            lines.Add($"And {replenishments.Count - 3} more windows.");
+            lines.Add($"另有 {replenishments.Count - 3} 个额度周期。");
 
         return new QuotaAlertNotification(
-            $"{providerName} quotas replenished",
+            $"{providerName} 额度已恢复",
             string.Join(Environment.NewLine, lines));
     }
 
@@ -392,11 +393,11 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
         var used = window.Window.UsedPercent;
         var reset = string.IsNullOrWhiteSpace(window.Window.ResetDescription)
             ? string.Empty
-            : $" Resets in {window.Window.ResetDescription}.";
+            : $" {UiText.FormatResetDescription(window.Window.ResetDescription)}。";
 
         return new QuotaAlertNotification(
-            $"{providerName} {window.Title.ToLowerInvariant()} quota is at {used:0}%",
-            $"{threshold.Severity.ToUpperInvariant()} threshold crossed ({threshold.Value:0}%).{reset}");
+            $"{providerName} {UiText.TranslateLabel(window.Title)}额度已用 {used:0}%",
+            $"已超过{(threshold.Severity == "critical" ? "严重" : "警告")}阈值（{threshold.Value:0}%）。{reset}");
     }
 
     public static QuotaAlertNotification FromResetCreditExpiry(
@@ -406,15 +407,15 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
     {
         var local = expiresAt.ToLocalTime();
         return new QuotaAlertNotification(
-            $"{providerName} reset credit expires soon",
-            $"Oldest reset credit expires in {FormatTimeUntil(expiresAt, now)} ({local:MMM d 'at' h:mm tt}). Use it before it expires.");
+            $"{providerName} 重置机会即将到期",
+            $"最早的一次重置机会将在 {FormatTimeUntil(expiresAt, now)}后到期（{local:M月d日 HH:mm}），请在到期前使用。");
     }
 
     private static string FormatTimeUntil(DateTimeOffset target, DateTimeOffset now)
     {
         var diff = target - now;
         if (diff <= TimeSpan.Zero)
-            return "now";
+            return "现在";
 
         int hours = (int)diff.TotalHours;
         int minutes = diff.Minutes;
@@ -422,13 +423,13 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
         {
             int days = hours / 24;
             int remHours = hours % 24;
-            return remHours == 0 ? $"{days}d" : $"{days}d {remHours}h";
+            return remHours == 0 ? $"{days}天" : $"{days}天{remHours}小时";
         }
 
         if (hours > 0)
-            return minutes == 0 ? $"{hours}h" : $"{hours}h {minutes}m";
+            return minutes == 0 ? $"{hours}小时" : $"{hours}小时{minutes}分";
 
-        return $"{minutes}m";
+        return $"{minutes}分";
     }
 
     private static string FormatPercent(double value)

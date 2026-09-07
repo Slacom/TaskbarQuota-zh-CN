@@ -22,8 +22,8 @@ public class QuotaAlertServiceTests
         service.OnStateChanged(Result(2, usedPercent: 4));
 
         var notification = Assert.Single(notifier.Notifications);
-        Assert.Equal("Codex session quota increased", notification.Title);
-        Assert.Equal("Available quota increased from 12% to 96%.", notification.Body);
+        Assert.Equal("Codex 会话额度已增加", notification.Title);
+        Assert.Equal("可用额度从 12% 增加到 96%。", notification.Body);
     }
 
     [Fact]
@@ -93,8 +93,8 @@ public class QuotaAlertServiceTests
         service.OnStateChanged(Result(1, usedPercent: 0, email: "same@example.test"));
 
         var notification = Assert.Single(notifier.Notifications);
-        Assert.Equal("Codex session quota replenished", notification.Title);
-        Assert.Equal("Available quota is now 100%.", notification.Body);
+        Assert.Equal("Codex 会话额度已恢复", notification.Title);
+        Assert.Equal("当前可用额度为 100%。", notification.Body);
     }
 
     [Fact]

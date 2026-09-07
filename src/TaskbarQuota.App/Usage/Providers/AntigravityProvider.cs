@@ -54,7 +54,7 @@ namespace TaskbarQuota.Usage.Providers
             // plan-aware quota groups (weekly, plus a 5-hour limit on Plus/Pro/Ultra tiers).
             var statusJson = await CallWithCsrf($"{baseUrl}/GetUserStatus", meta, info, ct).ConfigureAwait(false);
             if (statusJson == null)
-                throw new ProviderException(ProviderErrorKind.Other, "Antigravity API request failed.");
+                throw new ProviderException(ProviderErrorKind.Other, "Antigravity API 请求失败。");
 
             var summaryJson = await CallWithCsrf($"{baseUrl}/RetrieveUserQuotaSummary", "{}", info, ct).ConfigureAwait(false);
 
@@ -95,7 +95,7 @@ namespace TaskbarQuota.Usage.Providers
         private static UsageSnapshot ParseUserStatus(JsonElement root)
         {
             if (!root.TryGetProperty("userStatus", out var us) || us.ValueKind != JsonValueKind.Object)
-                throw new ProviderException(ProviderErrorKind.Parse, "Antigravity: missing userStatus.");
+                throw new ProviderException(ProviderErrorKind.Parse, "Antigravity 响应缺少 userStatus。");
 
             var configs = new List<(string label, RateWindow window)>();
             if (us.TryGetProperty("cascadeModelConfigData", out var d) &&
@@ -289,7 +289,7 @@ namespace TaskbarQuota.Usage.Providers
                 }
 
                 if (tokenlessIde != null)
-                    throw new ProviderException(ProviderErrorKind.NotRunning, "Antigravity language server is missing its CSRF token. Restart Antigravity and retry.");
+                    throw new ProviderException(ProviderErrorKind.NotRunning, "Antigravity 语言服务器缺少 CSRF Token。请重启 Antigravity 后重试。");
             }
             catch (ProviderException)
             {
@@ -371,7 +371,7 @@ namespace TaskbarQuota.Usage.Providers
             }
 
             linkedCts.Dispose();
-            throw new ProviderException(ProviderErrorKind.Other, "Could not find Antigravity API port.");
+            throw new ProviderException(ProviderErrorKind.Other, "无法找到 Antigravity API 端口。");
         }
 
         private static async Task<ApiEndpoint?> ProbeEndpointResult(int port, string csrf, CancellationToken ct)

@@ -25,7 +25,7 @@ public class QuotaAlertEvaluatorTests
         var alerts = QuotaAlertEvaluator.Evaluate(result, Settings(), state, Now()).ToArray();
 
         var alert = Assert.Single(alerts);
-        Assert.Contains("CRITICAL", alert.Body);
+        Assert.Contains("严重", alert.Body);
     }
 
     [Fact]
@@ -38,9 +38,9 @@ public class QuotaAlertEvaluatorTests
         var critical = QuotaAlertEvaluator.Evaluate(Result(91), Settings(), state, first.AddMinutes(1)).ToArray();
 
         Assert.Single(warning);
-        Assert.Contains("WARNING", warning[0].Body);
+        Assert.Contains("警告", warning[0].Body);
         Assert.Single(critical);
-        Assert.Contains("CRITICAL", critical[0].Body);
+        Assert.Contains("严重", critical[0].Body);
     }
 
     [Fact]
@@ -136,8 +136,8 @@ public class QuotaAlertEvaluatorTests
         var alerts = QuotaAlertEvaluator.Evaluate(CodexResetCreditResult(expiresAt), Settings(), state, Now()).ToArray();
 
         var alert = Assert.Single(alerts);
-        Assert.Contains("reset credit expires soon", alert.Title);
-        Assert.Contains("Oldest reset credit expires in 5d", alert.Body);
+        Assert.Contains("重置机会即将到期", alert.Title);
+        Assert.Contains("最早的一次重置机会将在 5天后到期", alert.Body);
     }
 
     [Fact]
@@ -197,8 +197,8 @@ public class QuotaAlertEvaluatorTests
             "Codex",
             [Replenishment("Weekly", 88, 62, QuotaReplenishmentKind.AvailabilityIncrease)]);
 
-        Assert.Equal("Codex weekly quota increased", notification.Title);
-        Assert.Equal("Available quota increased from 12% to 38%.", notification.Body);
+        Assert.Equal("Codex 每周额度已增加", notification.Title);
+        Assert.Equal("可用额度从 12% 增加到 38%。", notification.Body);
         Assert.DoesNotContain("reset", notification.Title, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("reset", notification.Body, StringComparison.OrdinalIgnoreCase);
     }
@@ -210,8 +210,8 @@ public class QuotaAlertEvaluatorTests
             "Codex",
             [Replenishment("Session", 88, 0, QuotaReplenishmentKind.FullReplenishment)]);
 
-        Assert.Equal("Codex session quota replenished", notification.Title);
-        Assert.Equal("Available quota is now 100%.", notification.Body);
+        Assert.Equal("Codex 会话额度已恢复", notification.Title);
+        Assert.Equal("当前可用额度为 100%。", notification.Body);
     }
 
     [Fact]
@@ -221,8 +221,8 @@ public class QuotaAlertEvaluatorTests
             "Codex",
             [Replenishment("Weekly", 88, 4, QuotaReplenishmentKind.ConfirmedCycleRenewal)]);
 
-        Assert.Equal("Codex weekly quota renewed", notification.Title);
-        Assert.Equal("Available quota increased from 12% to 96%.", notification.Body);
+        Assert.Equal("Codex 每周额度已刷新", notification.Title);
+        Assert.Equal("可用额度从 12% 增加到 96%。", notification.Body);
     }
 
     [Fact]
@@ -240,9 +240,9 @@ public class QuotaAlertEvaluatorTests
         var notification = QuotaAlertNotification.FromReplenishments("Codex", replenishments);
         var lines = notification.Body.Split(Environment.NewLine);
 
-        Assert.Equal("Codex quotas replenished", notification.Title);
+        Assert.Equal("Codex 额度已恢复", notification.Title);
         Assert.Equal(4, lines.Length);
-        Assert.Equal("And 2 more windows.", lines[3]);
+        Assert.Equal("另有 2 个额度周期。", lines[3]);
     }
 
     private static QuotaAlertSettings Settings(bool enabled = true) => new()

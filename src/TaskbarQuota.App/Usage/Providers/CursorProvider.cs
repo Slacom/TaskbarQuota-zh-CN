@@ -70,7 +70,7 @@ namespace TaskbarQuota.Usage.Providers
 
         private static async Task<ProviderFetchResult> FetchUsageWithAppTokenAsync(CursorAppAuth auth, CancellationToken ct)
         {
-            var token = auth.AccessToken ?? throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor app token missing");
+            var token = auth.AccessToken ?? throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Cursor 应用 Token");
             JsonDocument usage;
             try
             {
@@ -107,7 +107,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (!string.IsNullOrEmpty(header)) return header!;
             }
             throw new ProviderException(ProviderErrorKind.AuthRequired,
-                "No Cursor cookies found. Sign in via Edge/Chrome, or paste a cookie header in credentials.json.");
+                "未找到 Cursor Cookie。请通过 Edge/Chrome 登录，或在 credentials.json 中粘贴 Cookie 请求头。");
         }
 
         private static async Task<JsonDocument> GetJson(string url, string cookie, CancellationToken ct)
@@ -117,9 +117,9 @@ namespace TaskbarQuota.Usage.Providers
             req.Headers.Accept.ParseAdd("application/json");
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor cookies expired. Sign in again.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor Cookie 已过期，请重新登录。");
             if (!resp.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Cursor API returned {(int)resp.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Cursor API 返回状态码 {(int)resp.StatusCode}");
             var s = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             return await JsonDocument.ParseAsync(s, cancellationToken: ct).ConfigureAwait(false);
         }
@@ -131,9 +131,9 @@ namespace TaskbarQuota.Usage.Providers
             req.Headers.Accept.ParseAdd("application/json");
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor app token expired. Sign in to Cursor again.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor 应用 Token 已过期，请重新登录 Cursor。");
             if (!resp.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Cursor app API returned {(int)resp.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Cursor 应用 API 返回状态码 {(int)resp.StatusCode}");
             var s = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             return await JsonDocument.ParseAsync(s, cancellationToken: ct).ConfigureAwait(false);
         }
@@ -149,9 +149,9 @@ namespace TaskbarQuota.Usage.Providers
             req.Headers.Accept.ParseAdd("application/json");
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor app token expired. Sign in to Cursor again.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor 应用 Token 已过期，请重新登录 Cursor。");
             if (!resp.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"Cursor app API returned {(int)resp.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"Cursor 应用 API 返回状态码 {(int)resp.StatusCode}");
             var s = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             return await JsonDocument.ParseAsync(s, cancellationToken: ct).ConfigureAwait(false);
         }
@@ -167,13 +167,13 @@ namespace TaskbarQuota.Usage.Providers
             using var doc = await PostAppJson("/oauth/token", refreshToken, body, ct).ConfigureAwait(false);
             if (GetStr(doc.RootElement, "access_token") is { Length: > 0 } access)
                 return access;
-            throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor refresh token expired. Sign in to Cursor again.");
+            throw new ProviderException(ProviderErrorKind.AuthRequired, "Cursor 刷新 Token 已过期，请重新登录 Cursor。");
         }
 
         private static ProviderFetchResult BuildFromAppUsage(JsonElement root, CursorAppAuth auth)
         {
             if (!TryGetObject(root, "planUsage", out var plan))
-                throw new ProviderException(ProviderErrorKind.Parse, "Cursor app usage response did not include planUsage.");
+                throw new ProviderException(ProviderErrorKind.Parse, "Cursor 应用用量响应中缺少 planUsage。");
 
             var billingEnd = ParseCursorMillis(FindString(root, "billingCycleEnd"));
             var resetDescription = CodexProvider.FormatResetCountdown(billingEnd);

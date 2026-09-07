@@ -134,8 +134,8 @@ public class ClaudeProviderCredentialTests
             WidgetSettingsService.SetRowVisibleForTesting(ProviderId.Claude, WidgetSettingsService.RowExtra, false);
             var disabledLabels = WidgetSummary.BuildRowLabelsForTesting(result, usage);
 
-            Assert.Equal(new[] { "Session", "Weekly", "Fable" }, defaultLabels);
-            Assert.Equal(new[] { "Session", "Weekly" }, disabledLabels);
+            Assert.Equal(new[] { "会话", "每周", "Fable" }, defaultLabels);
+            Assert.Equal(new[] { "会话", "每周" }, disabledLabels);
         }
         finally
         {

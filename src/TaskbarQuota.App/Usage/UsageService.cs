@@ -64,9 +64,9 @@ namespace TaskbarQuota.Usage
 
         public IReadOnlyCollection<IUsageProvider> All => _providers.Values;
 
-        public IReadOnlyList<UsageResult> Snapshot(ProviderId? active = null, string message = "Loading...")
+        public IReadOnlyList<UsageResult> Snapshot(ProviderId? active = null, string message = "正在加载…")
             => _providers.Values
-                .Select(p => UsageResult.Pending(p.Id, p, active == p.Id ? "Loading active provider..." : message))
+                .Select(p => UsageResult.Pending(p.Id, p, active == p.Id ? "正在加载当前服务…" : message))
                 .ToArray();
 
         public bool TryGetCached(ProviderId id, out UsageResult result)
@@ -80,14 +80,14 @@ namespace TaskbarQuota.Usage
                 }
             }
 
-            result = UsageResult.Failure(id, "No cached result.");
+            result = UsageResult.Failure(id, "暂无缓存结果。");
             return false;
         }
 
         public async Task<UsageResult> FetchAsync(ProviderId id, bool force = false, CancellationToken ct = default)
         {
             if (!_providers.TryGetValue(id, out var provider))
-                return UsageResult.Failure(id, "Provider not available yet.");
+                return UsageResult.Failure(id, "服务暂不可用。");
 
             lock (_lock)
             {
@@ -155,13 +155,14 @@ namespace TaskbarQuota.Usage
             }
             catch (Exception ex)
             {
+                Log.Warning(ex, $"Usage provider {id} fetch failed");
                 if (TryCreateLocalHistoryResult(id, provider, out var localResult))
                 {
                     Store(id, localResult, FetchCachePolicy.TtlForFailure(null));
                     return localResult;
                 }
 
-                var result = UsageResult.Failure(id, ex.Message, provider);
+                var result = UsageResult.Failure(id, "获取用量失败，请稍后重试。", provider);
                 Store(id, result, FetchCachePolicy.TtlForFailure(null));
                 return result;
             }
@@ -245,7 +246,7 @@ namespace TaskbarQuota.Usage
                 }
             }
 
-            result = UsageResult.Failure(id, "No successful live result.");
+            result = UsageResult.Failure(id, "暂无成功的实时结果。");
             return false;
         }
 
@@ -335,7 +336,7 @@ namespace TaskbarQuota.Usage
         {
             if (!UsageHistoryService.TryLoad(id, out var history))
             {
-                result = UsageResult.Failure(id, "No local usage history found.", provider);
+                result = UsageResult.Failure(id, "未找到本地使用记录。", provider);
                 return false;
             }
 

@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using TaskbarQuota.Diagnostics;
 using TaskbarQuota.Helpers;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Services;
 using TaskbarQuota.Taskbar;
 using TaskbarQuota.Usage;
@@ -77,7 +78,7 @@ namespace TaskbarQuota.Views
             HideWhenUnfocusedToggle.IsOn = WidgetSettingsService.HideWhenProviderUnfocused;
             ViewModel.ReloadProviders();
             RebuildProviderSettings();
-            VersionLabel.Text = $"Version {AppVersion.GetDisplayLabel()}";
+            VersionLabel.Text = $"版本 {AppVersion.GetDisplayLabel()}";
             Loaded += (_, _) =>
             {
                 Log.Information(
@@ -119,8 +120,8 @@ namespace TaskbarQuota.Views
                 _providerRows[item.Id] = toggles;
 
                 var content = new StackPanel { Spacing = 8, MinWidth = 180 };
-                content.Children.Add(CreateProviderToggleRow("Dashboard", item, ProviderToggleKind.Dashboard, toggles));
-                content.Children.Add(CreateProviderToggleRow("Widget", item, ProviderToggleKind.Widget, toggles));
+                content.Children.Add(CreateProviderToggleRow("仪表板", item, ProviderToggleKind.Dashboard, toggles));
+                content.Children.Add(CreateProviderToggleRow(UiText.Get("Widget"), item, ProviderToggleKind.Widget, toggles));
                 content.Children.Add(CreateProviderPinRow(item, toggles));
                 card.Content = content;
 
@@ -175,7 +176,7 @@ namespace TaskbarQuota.Views
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             row.Children.Add(new TextBlock
             {
-                Text = "Pin",
+                Text = UiText.Get("Pin"),
                 Width = 72,
                 VerticalAlignment = VerticalAlignment.Center,
                 Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
@@ -370,7 +371,7 @@ namespace TaskbarQuota.Views
             try
             {
                 TaskbarPlacementCombo.Items.Clear();
-                AddTaskbarPlacementOption(new("All screens", TaskbarPlacementMode.AllDisplays));
+                AddTaskbarPlacementOption(new("所有屏幕", TaskbarPlacementMode.AllDisplays));
 
                 var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
                 if (TaskbarWindowTarget.TryFindAll(out var targets))
@@ -383,10 +384,10 @@ namespace TaskbarQuota.Views
                             continue;
 
                         string screenName = target.DisplayNumber > 0
-                            ? $"Screen {target.DisplayNumber}"
-                            : "Detected screen";
+                            ? $"屏幕 {target.DisplayNumber}"
+                            : "检测到的屏幕";
                         if (target.IsPrimary)
-                            screenName += " (primary)";
+                            screenName += "（主屏幕）";
                         AddTaskbarPlacementOption(new(
                             screenName,
                             TaskbarPlacementMode.SelectedDisplay,
@@ -400,12 +401,12 @@ namespace TaskbarQuota.Views
                     && seen.Add(selectedKey))
                 {
                     AddTaskbarPlacementOption(new(
-                        $"{selectedKey} (disconnected)",
+                        $"{selectedKey}（已断开）",
                         TaskbarPlacementMode.SelectedDisplay,
                         selectedKey));
                 }
 
-                AddTaskbarPlacementOption(new("Adaptive (follow each agent)", TaskbarPlacementMode.Adaptive));
+                AddTaskbarPlacementOption(new("自适应（跟随每个智能体）", TaskbarPlacementMode.Adaptive));
 
                 for (int i = 0; i < TaskbarPlacementCombo.Items.Count; i++)
                 {
@@ -435,17 +436,17 @@ namespace TaskbarQuota.Views
         private void BuildPinOptions()
         {
             _pinOptions.Clear();
-            _pinOptions.Add(new("Not pinned", false));
+            _pinOptions.Add(new("未固定", false));
 
             if (WidgetSettingsService.CurrentTaskbarPlacement != TaskbarPlacementMode.Adaptive)
             {
-                _pinOptions.Add(new("Pinned", true, MatchesAnyDestination: true));
+                _pinOptions.Add(new(UiText.Get("Pinned"), true, MatchesAnyDestination: true));
                 return;
             }
 
             if (!TaskbarWindowTarget.TryFindAll(out var targets))
             {
-                _pinOptions.Add(new("Pinned", true, MatchesAnyDestination: true));
+                _pinOptions.Add(new(UiText.Get("Pinned"), true, MatchesAnyDestination: true));
                 return;
             }
 
@@ -457,25 +458,25 @@ namespace TaskbarQuota.Views
                 .ToList();
             if (displays.Count < 2)
             {
-                _pinOptions.Add(new("Pinned", true, MatchesAnyDestination: true));
+                _pinOptions.Add(new(UiText.Get("Pinned"), true, MatchesAnyDestination: true));
                 return;
 
             }
 
-            _pinOptions.Add(new("Pinned — follow app", true));
+            _pinOptions.Add(new("已固定 — 跟随应用", true));
             _pinOptions.Add(new(
-                "Pinned — all screens",
+                "已固定 — 所有屏幕",
                 true,
                 WidgetSettingsService.AllDisplaysPinDestination));
 
             foreach (var target in displays)
             {
                 string screenName = target.DisplayNumber > 0
-                    ? $"Screen {target.DisplayNumber}"
-                    : "Detected screen";
+                    ? $"屏幕 {target.DisplayNumber}"
+                    : "检测到的屏幕";
                 if (target.IsPrimary)
-                    screenName += " (primary)";
-                _pinOptions.Add(new($"Pinned — {screenName}", true, target.DisplayKey));
+                    screenName += "（主屏幕）";
+                _pinOptions.Add(new($"已固定 — {screenName}", true, target.DisplayKey));
             }
 
             var known = displays.Select(target => target.DisplayKey)
@@ -486,7 +487,7 @@ namespace TaskbarQuota.Views
                 if (saved is not null
                     && saved != WidgetSettingsService.AllDisplaysPinDestination
                     && known.Add(saved))
-                    _pinOptions.Add(new($"Pinned — {saved} (disconnected)", true, saved));
+                    _pinOptions.Add(new($"已固定 — {saved}（已断开）", true, saved));
             }
         }
 
@@ -544,7 +545,7 @@ namespace TaskbarQuota.Views
                 System.Math.Round(WidgetSettingsService.FloatingOpacity * 100),
                 35,
                 100);
-            AutomationProperties.SetName(slider, "Floating acrylic strength");
+            AutomationProperties.SetName(slider, UiText.Get("Floating acrylic strength"));
             AutomationProperties.SetAutomationId(slider, "SettingsFloatingOpacitySlider");
             slider.ValueChanged += OnFloatingOpacityChanged;
 

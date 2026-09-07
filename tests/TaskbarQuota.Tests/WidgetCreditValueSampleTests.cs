@@ -45,7 +45,7 @@ public class WidgetCreditValueSampleTests
         };
 
         Assert.Equal(
-            "\nToday: $25.15 estimated · 35.4M tokens",
+            "\n今天：估算 $25.15 · 35.4M Token",
             WidgetSummary.WidgetUsageHistoryTooltipLine(history));
     }
 
@@ -58,7 +58,7 @@ public class WidgetCreditValueSampleTests
         };
 
         Assert.Equal(
-            "\nToday: 1.5M tokens · cost unavailable",
+            "\n今天：1.5M Token · 成本不可用",
             WidgetSummary.WidgetUsageHistoryTooltipLine(history));
     }
 }

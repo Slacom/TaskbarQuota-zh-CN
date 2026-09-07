@@ -60,13 +60,13 @@ namespace TaskbarQuota.Usage.Providers
         {
             using var response = await SendAsync(url, apiKey, ct).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "z.ai API key invalid or expired. Update your API key.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "z.ai API 密钥无效或已过期，请更新密钥。");
             if ((int)response.StatusCode == 429)
-                throw new ProviderException(ProviderErrorKind.RateLimited, "z.ai API rate limited. Try again later.");
+                throw new ProviderException(ProviderErrorKind.RateLimited, "z.ai API 请求频率受限，请稍后重试。");
             if (!response.IsSuccessStatusCode)
             {
                 int code2 = (int)response.StatusCode;
-                throw new ProviderException(ProviderErrorKind.Other, $"z.ai API returned {code2}");
+                throw new ProviderException(ProviderErrorKind.Other, $"z.ai API 返回状态码 {code2}");
             }
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
@@ -115,11 +115,11 @@ namespace TaskbarQuota.Usage.Providers
         {
             if (!root.TryGetProperty("success", out var successEl) || !successEl.GetBoolean())
             {
-                var msg = root.TryGetProperty("msg", out var msgEl) ? msgEl.GetString() : "Unknown error";
-                throw new ProviderException(ProviderErrorKind.Other, $"z.ai API error: {msg}");
+                var msg = root.TryGetProperty("msg", out var msgEl) ? msgEl.GetString() : "未知错误";
+                throw new ProviderException(ProviderErrorKind.Other, $"z.ai API 错误：{msg}");
             }
             if (!root.TryGetProperty("data", out var data) || data.ValueKind == JsonValueKind.Null)
-                throw new ProviderException(ProviderErrorKind.Parse, "z.ai API returned no data.");
+                throw new ProviderException(ProviderErrorKind.Parse, "z.ai API 未返回数据。");
             var subscription = ParseCurrentSubscription(subscriptionRoot);
             string? planName = subscription?.ProductName;
             foreach (var key in new[] { "planName", "plan", "plan_type", "packageName" })
@@ -381,7 +381,7 @@ namespace TaskbarQuota.Usage.Providers
             if (!string.IsNullOrWhiteSpace(fromZCode)) return fromZCode!;
             if (!ProviderInstallDetector.IsInstalled(ProviderId.Zai))
                 throw new ProviderException(ProviderErrorKind.NotInstalled, ProviderInstallDetector.NotInstalledMessage(ProviderId.Zai));
-            throw new ProviderException(ProviderErrorKind.AuthRequired, "z.ai API key not found. Set Z_AI_API_KEY or add it in Settings.");
+            throw new ProviderException(ProviderErrorKind.AuthRequired, "未找到 z.ai API 密钥。请设置 Z_AI_API_KEY，或在设置中添加密钥。");
         }
 
         internal static string? TryLoadApiKeyFromZCodeConfig(string? userProfileOverride = null)

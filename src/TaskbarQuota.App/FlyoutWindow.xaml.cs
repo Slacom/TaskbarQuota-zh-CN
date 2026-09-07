@@ -18,6 +18,7 @@ using TaskbarQuota.Controls;
 using TaskbarQuota.AgentActivity;
 using TaskbarQuota.Diagnostics;
 using TaskbarQuota.Interop;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Services;
 using TaskbarQuota.Taskbar;
 using TaskbarQuota.Usage;
@@ -318,13 +319,13 @@ namespace TaskbarQuota
             ActivityWidgetButton.IsEnabled = monitoringEnabled;
             ActivityMonitoringButton.IsChecked = monitoringEnabled;
             ToolTipService.SetToolTip(ActivityWidgetButton,
-                widgetEnabled ? "Hide agent activity from usage widget" : "Show agent activity in usage widget");
+                widgetEnabled ? "从用量小组件中隐藏智能体活动" : UiText.Get("Show agent activity in usage widget"));
             AutomationProperties.SetName(ActivityWidgetButton,
-                widgetEnabled ? "Hide agent activity from usage widget" : "Show agent activity in usage widget");
+                widgetEnabled ? "从用量小组件中隐藏智能体活动" : UiText.Get("Show agent activity in usage widget"));
             ToolTipService.SetToolTip(ActivityMonitoringButton,
-                monitoringEnabled ? "Stop monitoring local agent activity" : "Start monitoring local agent activity");
+                monitoringEnabled ? "停止监控本地智能体活动" : "开始监控本地智能体活动");
             AutomationProperties.SetName(ActivityMonitoringButton,
-                monitoringEnabled ? "Stop monitoring local agent activity" : "Start monitoring local agent activity");
+                monitoringEnabled ? "停止监控本地智能体活动" : "开始监控本地智能体活动");
         }
 
         /// <summary>
@@ -349,9 +350,9 @@ namespace TaskbarQuota
                 Math.Round(WidgetSettingsService.FloatingOpacity * 100),
                 35,
                 100);
-            AutomationProperties.SetName(slider, "Floating acrylic strength");
+            AutomationProperties.SetName(slider, UiText.Get("Floating acrylic strength"));
             AutomationProperties.SetAutomationId(slider, "FlyoutFloatingOpacitySlider");
-            ToolTipService.SetToolTip(slider, "Floating Acrylic strength (or scroll the floating window). Lower reveals more of the blurred desktop.");
+            ToolTipService.SetToolTip(slider, "调节悬浮窗亚克力强度，也可在悬浮窗上滚动鼠标滚轮。数值越低，后方模糊桌面越明显。");
             slider.ValueChanged += FloatingOpacitySlider_ValueChanged;
 
             FloatingOpacitySliderHost.Children.Clear();
@@ -366,15 +367,15 @@ namespace TaskbarQuota
             {
                 bool floating = WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Floating;
                 FloatingSurfaceButton.IsChecked = floating;
-                FloatingSurfaceButtonLabel.Text = floating ? "Floating" : "Taskbar";
+                FloatingSurfaceButtonLabel.Text = floating ? UiText.Get("Floating") : "任务栏";
                 ToolTipService.SetToolTip(FloatingSurfaceButton,
                     floating
-                        ? "Switch back to the taskbar widget"
-                        : "Show usage as a floating always-on-top window");
+                        ? "切换回任务栏小组件"
+                        : "以悬浮置顶窗口显示用量");
                 AutomationProperties.SetName(FloatingSurfaceButton,
                     floating
-                        ? "Show usage in the taskbar"
-                        : "Show usage as floating window");
+                        ? "在任务栏中显示用量"
+                        : UiText.Get("Show usage as floating window"));
 
                 int percent = (int)Math.Round(WidgetSettingsService.FloatingOpacity * 100);
                 if (_floatingOpacitySlider is { } slider)
@@ -383,8 +384,8 @@ namespace TaskbarQuota
                     slider.IsEnabled = floating;
                     ToolTipService.SetToolTip(slider,
                         floating
-                            ? "Floating acrylic strength"
-                            : "Acrylic strength applies when floating window mode is on");
+                            ? UiText.Get("Floating acrylic strength")
+                            : "启用悬浮窗模式后可调节亚克力强度");
                 }
                 FloatingOpacityLabel.Text = $"{percent}%";
                 FloatingOpacityLabel.Opacity = floating ? 0.9 : 0.45;
@@ -424,7 +425,7 @@ namespace TaskbarQuota
             ActivityList.Children.Clear();
             var items = snapshot.ItemsForDisplay(_selectedActivityId);
             bool monitoringEnabled = WidgetSettingsService.EnableAgentActivityMonitoring;
-            ActivityEmptyState.Text = monitoringEnabled ? "No recent agent activity" : "Agent activity monitoring is off";
+            ActivityEmptyState.Text = monitoringEnabled ? UiText.Get("No recent agent activity") : "智能体活动监控已关闭";
             ActivityEmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             ActivityScrollViewer.Visibility = items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             FrameworkElement? selectedCard = null;
@@ -442,7 +443,8 @@ namespace TaskbarQuota
                     BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
                     BorderThickness = new Thickness(1),
                 };
-                var accessibleName = $"{ActivityTitle(item)}, {ActivityProviderLabel(item)}, {item.StatusText}. {item.Step}";
+                var statusText = LocalizedActivityStatus(item.Status);
+                var accessibleName = $"{ActivityTitle(item)}，{ActivityProviderLabel(item)}，{statusText}。{item.Step}";
                 AutomationProperties.SetName(card, accessibleName);
                 AutomationProperties.SetAutomationId(card, $"AgentActivityCard_{ActivityList.Children.Count}");
                 if (item.Id == _selectedActivityId)
@@ -450,7 +452,7 @@ namespace TaskbarQuota
                     card.BorderBrush = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
                     card.BorderThickness = new Thickness(2);
                     selectedCard = card;
-                    AutomationProperties.SetName(ActivityScrollViewer, $"Selected agent activity. {accessibleName}");
+                    AutomationProperties.SetName(ActivityScrollViewer, $"已选择的智能体活动。{accessibleName}");
                 }
                 var row = new Grid { ColumnSpacing = 10 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
@@ -459,13 +461,13 @@ namespace TaskbarQuota
                 var text = new StackPanel { Spacing = 2 };
                 text.Children.Add(new TextBlock { Text = ActivityTitle(item), Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
                 var metadata = string.IsNullOrWhiteSpace(item.Model)
-                    ? $"{ActivityProviderLabel(item)} · {item.StatusText}"
-                    : $"{ActivityProviderLabel(item)} · {item.Model} · {item.StatusText}";
+                    ? $"{ActivityProviderLabel(item)} · {statusText}"
+                    : $"{ActivityProviderLabel(item)} · {item.Model} · {statusText}";
                 var mutedTextBrush = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
                 text.Children.Add(new TextBlock { Text = metadata, Foreground = mutedTextBrush, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
                 text.Children.Add(new TextBlock { Text = item.Step, Foreground = mutedTextBrush, TextTrimming = TextTrimming.CharacterEllipsis, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
                 if (item.SubagentCount > 0)
-                    text.Children.Add(new TextBlock { Text = $"▸ {item.SubagentCount} subagents", Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
+                    text.Children.Add(new TextBlock { Text = $"▸ {item.SubagentCount} 个子智能体", Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
                 Grid.SetColumn(text, 1);
                 row.Children.Add(text);
                 card.Child = row;
@@ -490,10 +492,20 @@ namespace TaskbarQuota
             _ => provider.ToString(),
         };
 
+        private static string LocalizedActivityStatus(AgentActivityStatus status) => status switch
+        {
+            AgentActivityStatus.Working => "处理中",
+            AgentActivityStatus.Waiting => "等待中",
+            AgentActivityStatus.Idle => "空闲",
+            AgentActivityStatus.Completed => "已完成",
+            AgentActivityStatus.Failed => "失败",
+            _ => status.ToString(),
+        };
+
         private static string ActivityProviderLabel(AgentActivityItem item)
         {
             var provider = ActivityProviderDisplayName(item.Provider);
-            return string.IsNullOrWhiteSpace(item.Host) ? provider : $"{provider} through {item.Host}";
+            return string.IsNullOrWhiteSpace(item.Host) ? provider : $"{provider} 经 {item.Host}";
         }
 
         private static string ActivityTitle(AgentActivityItem item)
@@ -838,8 +850,8 @@ namespace TaskbarQuota
 
             string? fixedDisplay = WidgetSettingsService.GetPinnedProviderDisplay(id);
             string pinDescription = fixedDisplay is null
-                ? "pinned — follows app screen"
-                : $"pinned to {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}";
+                ? "已固定 — 跟随应用屏幕"
+                : $"已固定到 {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}";
             ToolTipService.SetToolTip(button, pinned ? $"{displayName} — {pinDescription}" : displayName);
         }
 

@@ -10,7 +10,7 @@ namespace TaskbarQuota.ViewModels
         public double? CostUsd { get; }
         public double RelativePercent { get; }
 
-        public string TokensText => $"{TotalTokens:N0} tok";
+        public string TokensText => $"{TotalTokens:N0} Token";
         public string CostText => CostUsd.HasValue ? $"${CostUsd.Value:F2}" : "—";
 
         public ModelUsageItemViewModel(ModelUsageEntry entry, ulong maxTokens)

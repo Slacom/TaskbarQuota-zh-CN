@@ -67,7 +67,7 @@ public sealed class UpdateAvailabilityService
 
             if (result.Kind == UpdateCheckResultKind.UpToDate)
             {
-                UpToDateSummary = $"You are on v{current} (latest).";
+                UpToDateSummary = $"当前版本 v{current} 已是最新版。";
                 SetHidden();
                 return;
             }
@@ -77,17 +77,17 @@ public sealed class UpdateAvailabilityService
 
             if (result.DeliveryChannel == UpdateDeliveryChannel.MicrosoftStore)
             {
-                StatusMessage = $"New update available in Microsoft Store (v{result.Version}).";
+                StatusMessage = $"Microsoft Store 中有可用更新（v{result.Version}）。";
                 UiState = UpdateAvailabilityUiState.UpdateAvailable;
             }
             else if (result.DownloadUrl is null)
             {
-                StatusMessage = $"New update available (v{result.Version}) — see GitHub release.";
+                StatusMessage = $"有可用更新（v{result.Version}），请查看 GitHub 发布页面。";
                 UiState = UpdateAvailabilityUiState.UpdateAvailable;
             }
             else
             {
-                StatusMessage = $"New update available! v{result.Version} is ready.";
+                StatusMessage = $"有可用更新！v{result.Version} 已准备就绪。";
                 UiState = UpdateAvailabilityUiState.UpdateAvailable;
             }
 
@@ -99,7 +99,7 @@ public sealed class UpdateAvailabilityService
         catch (Exception ex)
         {
             Log.Warning(ex, "Silent update check failed");
-            UpToDateSummary = "Could not check for updates. Try again.";
+            UpToDateSummary = "无法检查更新，请重试。";
             SetHidden();
         }
         finally
@@ -126,12 +126,12 @@ public sealed class UpdateAvailabilityService
             var ct = _operationCts.Token;
 
             UiState = UpdateAvailabilityUiState.Downloading;
-            StatusMessage = $"Downloading v{result.Version}…";
+            StatusMessage = $"正在下载 v{result.Version}…";
             NotifyChanged();
 
             DownloadedUpdate = await _checker.DownloadAsync(result, progress, ct).ConfigureAwait(false);
             UiState = UpdateAvailabilityUiState.ReadyToInstall;
-            StatusMessage = $"New update available! Install v{DownloadedUpdate.Version}.";
+            StatusMessage = $"有可用更新！可以安装 v{DownloadedUpdate.Version}。";
             NotifyChanged();
         }
         catch (OperationCanceledException)
@@ -139,7 +139,7 @@ public sealed class UpdateAvailabilityService
             if (AvailableUpdate is not null)
             {
                 UiState = UpdateAvailabilityUiState.UpdateAvailable;
-                StatusMessage = $"New update available! v{AvailableUpdate.Version} is ready.";
+                StatusMessage = $"有可用更新！v{AvailableUpdate.Version} 已准备就绪。";
                 NotifyChanged();
             }
         }
@@ -149,7 +149,7 @@ public sealed class UpdateAvailabilityService
             if (AvailableUpdate is not null)
             {
                 UiState = UpdateAvailabilityUiState.UpdateAvailable;
-                StatusMessage = $"Download failed — tap to retry (v{AvailableUpdate.Version}).";
+                StatusMessage = $"下载失败，请点击重试（v{AvailableUpdate.Version}）。";
                 NotifyChanged();
             }
         }

@@ -64,7 +64,7 @@ public class CopilotProviderTests
         Assert.Equal(25, result.Usage.Primary.UsedPercent, 1);
         Assert.NotNull(result.Usage.AdditionalUsage);
         Assert.False(result.Usage.AdditionalUsage!.Enabled);
-        Assert.Equal("$0.00 / $0 budget", result.Usage.AdditionalUsage.SpendText);
+        Assert.Equal("$0.00 / $0 预算", result.Usage.AdditionalUsage.SpendText);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class CopilotProviderTests
         Assert.True(additional!.Enabled);
         Assert.Equal(2.50, additional.SpentUsd, 2);
         Assert.Equal(10, additional.BudgetUsd);
-        Assert.Equal("$2.50 / $10.00 budget", additional.SpendText);
+        Assert.Equal("$2.50 / $10.00 预算", additional.SpendText);
     }
 
     [Fact]

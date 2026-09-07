@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using TaskbarQuota.Localization;
 
 namespace TaskbarQuota.Usage
 {
@@ -115,14 +116,14 @@ namespace TaskbarQuota.Usage
         /// <summary>When true, the spent/budget values are credit counts rather than US dollars.</summary>
         public bool IsCredits { get; init; }
 
-        public string StatusText => Enabled ? "Enabled" : "Not enabled";
+        public string StatusText => UiText.Get(Enabled ? "Enabled" : "Not enabled");
 
         public string SpendText
         {
             get
             {
                 string spent = Amount(SpentUsd);
-                string suffix = IsCredits ? "credits" : "budget";
+                string suffix = UiText.Get(IsCredits ? "Credits" : "Budget");
                 if (!Enabled)
                     return $"{spent} / {(IsCredits ? "0" : "$0")} {suffix}";
                 return BudgetUsd is double budget

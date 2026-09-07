@@ -44,11 +44,11 @@ namespace TaskbarQuota.Usage.Providers
             if (id is ProviderId.OpenCode or ProviderId.OpenCodeGo)
             {
                 throw new ProviderException(ProviderErrorKind.AuthRequired,
-                    $"No {id switch { ProviderId.OpenCode => "OpenCode", _ => "OpenCode Go" }} cookies detected. Manual cookie insertion is needed. Paste the opencode.ai Cookie header in Fix.");
+                    $"未检测到 {id switch { ProviderId.OpenCode => "OpenCode", _ => "OpenCode Go" }} Cookie。需要手动填写，请在“修复”中粘贴 opencode.ai Cookie 请求头。");
             }
 
             throw new ProviderException(ProviderErrorKind.AuthRequired,
-                $"No cookies found for {string.Join("/", domains)}. Sign in via Edge/Chrome or paste a cookie header in credentials.json.");
+                $"未找到 {string.Join("/", domains)} 的 Cookie。请通过 Edge/Chrome 登录，或在 credentials.json 中粘贴 Cookie 请求头。");
         }
 
         /// <summary>
@@ -84,9 +84,8 @@ namespace TaskbarQuota.Usage.Providers
 
             throw new ProviderException(
                 ProviderErrorKind.AuthRequired,
-                "OpenCode cookies could not be read automatically. Firefox/Zen and Chromium profiles " +
-                "with decryptable pre-127 cookies are supported. Chromium 127+ uses App-Bound " +
-                "Encryption; paste the opencode.ai Cookie header and, if needed, the workspace ID in Fix.");
+                "无法自动读取 OpenCode Cookie。支持 Firefox/Zen，以及 Cookie 可解密的 Chromium 127 之前版本。" +
+                "Chromium 127+ 使用应用绑定加密；请在“修复”中粘贴 opencode.ai Cookie 请求头，并在需要时填写工作区 ID。");
         }
 
         internal static async Task<ProviderFetchResult> FetchWithCandidatesAsync(
@@ -190,7 +189,7 @@ namespace TaskbarQuota.Usage.Providers
         public Task<ProviderFetchResult> FetchUsageAsync(CancellationToken ct = default)
             => CookieHelper.FetchWithCandidatesAsync(
                 Id,
-                "OpenCode cookies expired.",
+                "OpenCode Cookie 已过期。",
                 (cookie, token) => FetchUsageAsync(cookie, token),
                 ct,
                 // Every request is sent to opencode.ai. Do not merge cookies scoped only to the
@@ -229,15 +228,15 @@ namespace TaskbarQuota.Usage.Providers
             var monthlyLimit = FindMoneyValue(combined, "monthlyLimit", "monthly_limit");
 
             if (monthlyUsage is null && balance is null)
-                throw new ProviderException(ProviderErrorKind.Parse, "OpenCode: no dollar usage or balance found.");
+                throw new ProviderException(ProviderErrorKind.Parse, "OpenCode：未找到美元用量或余额。");
 
             var primary = monthlyLimit is { } limit && limit > 0 && monthlyUsage is { } used
                 ? new RateWindow(Math.Clamp(used / limit * 100.0, 0, 100), null, null, $"{used:0.00}/{limit:0.00} USD")
-                : new RateWindow(0, null, null, monthlyUsage is { } usedOnly ? $"{usedOnly:0.00} USD used" : "Usage unavailable");
+                : new RateWindow(0, null, null, monthlyUsage is { } usedOnly ? $"{usedOnly:0.00} USD 已用" : "用量不可用");
 
             var usage = new UsageSnapshot(primary)
             {
-                Secondary = balance is { } bal ? new RateWindow(0, null, null, $"{bal:0.00} USD balance") : null,
+                Secondary = balance is { } bal ? new RateWindow(0, null, null, $"{bal:0.00} USD 余额") : null,
                 LoginMethod = "Zen",
                 Cost = new CostSnapshot(monthlyUsage ?? balance ?? 0, "USD", monthlyUsage is null ? "Balance" : "Usage"),
                 UsageDashboardUrl = WorkspacePageUrl(workspaceId, "usage"),
@@ -299,7 +298,7 @@ namespace TaskbarQuota.Usage.Providers
             var ids = ParseWorkspaceIds(text);
             if (ids.Count > 0)
                 return CacheWorkspaceId(cacheKey, SelectWorkspaceId(providerName, "POST", ids));
-            throw new ProviderException(ProviderErrorKind.Parse, $"{providerName}: no workspace id found.");
+            throw new ProviderException(ProviderErrorKind.Parse, $"{providerName}：未找到工作区 ID。");
         }
 
         private static string SelectWorkspaceId(string providerName, string transport, IReadOnlyList<string> ids)
@@ -393,13 +392,13 @@ namespace TaskbarQuota.Usage.Providers
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
             var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (LooksSignedOut(text))
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode cookies expired.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode Cookie 已过期。");
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode cookies expired.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode Cookie 已过期。");
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
-                throw new ProviderException(ProviderErrorKind.RateLimited, "OpenCode API rate limited.");
+                throw new ProviderException(ProviderErrorKind.RateLimited, "OpenCode API 请求频率受限。");
             if (!resp.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"OpenCode API {(int)resp.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"OpenCode API 返回状态码 {(int)resp.StatusCode}");
             return text;
         }
 
@@ -414,11 +413,11 @@ namespace TaskbarQuota.Usage.Providers
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
             var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden || LooksSignedOut(text))
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode cookies expired.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode Cookie 已过期。");
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
-                throw new ProviderException(ProviderErrorKind.RateLimited, "OpenCode API rate limited.");
+                throw new ProviderException(ProviderErrorKind.RateLimited, "OpenCode API 请求频率受限。");
             if (!resp.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"OpenCode API {(int)resp.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"OpenCode API 返回状态码 {(int)resp.StatusCode}");
             return text;
         }
 
@@ -674,11 +673,11 @@ namespace TaskbarQuota.Usage.Providers
 
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode Go API key invalid or expired.");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "OpenCode Go API 密钥无效或已过期。");
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                throw new ProviderException(ProviderErrorKind.RateLimited, "OpenCode Go API rate limited. Try again later.");
+                throw new ProviderException(ProviderErrorKind.RateLimited, "OpenCode Go API 请求频率受限，请稍后重试。");
             if (!response.IsSuccessStatusCode)
-                throw new ProviderException(ProviderErrorKind.Other, $"OpenCode Go API returned {(int)response.StatusCode}");
+                throw new ProviderException(ProviderErrorKind.Other, $"OpenCode Go API 返回状态码 {(int)response.StatusCode}");
 
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             return await ParseResponse(stream, ct).ConfigureAwait(false);
@@ -687,10 +686,10 @@ namespace TaskbarQuota.Usage.Providers
         internal static ProviderFetchResult BuildResult(JsonElement root)
         {
             if (!root.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
-                throw new ProviderException(ProviderErrorKind.Parse, "OpenCode Go: missing usage payload.");
+                throw new ProviderException(ProviderErrorKind.Parse, "OpenCode Go 响应缺少 usage 数据。");
 
             var rolling = ParseWindow(usage, 300, "rolling")
-                ?? throw new ProviderException(ProviderErrorKind.Parse, "OpenCode Go: missing rolling usage.");
+                ?? throw new ProviderException(ProviderErrorKind.Parse, "OpenCode Go 响应缺少滚动用量数据。");
             var weekly = ParseWindow(usage, 10080, "weekly");
             var monthly = ParseWindow(usage, 43200, "monthly");
 
@@ -711,7 +710,7 @@ namespace TaskbarQuota.Usage.Providers
             }
             catch (JsonException ex)
             {
-                throw new ProviderException(ProviderErrorKind.Parse, $"OpenCode Go returned malformed JSON: {ex.Message}", ex);
+                throw new ProviderException(ProviderErrorKind.Parse, $"OpenCode Go 返回的 JSON 格式无效：{ex.Message}", ex);
             }
         }
 
@@ -739,7 +738,7 @@ namespace TaskbarQuota.Usage.Providers
         internal static string LoadApiKey(string? homeOverride)
             => TryLoadApiKey(homeOverride)
                 ?? throw new ProviderException(ProviderErrorKind.AuthRequired,
-                    "OpenCode Go API key not found. Set OPENCODE_API_KEY or sign in to the OpenCode Go CLI.");
+                    "未找到 OpenCode Go API 密钥。请设置 OPENCODE_API_KEY，或登录 OpenCode Go CLI。");
 
         internal static string? TryLoadApiKey(string? homeOverride = null)
         {
