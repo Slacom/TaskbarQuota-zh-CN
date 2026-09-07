@@ -63,10 +63,15 @@ public sealed class LocalizationTests
     ];
 
     [Theory]
-    [InlineData("Session", "会话")]
-    [InlineData("Weekly", "每周")]
+    [InlineData("Session", "5小时额度")]
+    [InlineData("Weekly", "每周额度")]
     [InlineData("Credits", "额度")]
-    [InlineData("Reset credits", "重置机会")]
+    [InlineData("Reset credits", "可用重置")]
+    [InlineData("Resets", "可用重置")]
+    [InlineData("Cost", "已用成本")]
+    [InlineData("Daily cost", "每日已用成本")]
+    [InlineData("Cost unavailable", "已用成本不可用")]
+    [InlineData("Providers", "供应商")]
     [InlineData("Usage history", "使用记录")]
     public void TranslateLabel_KnownUiLabel_ReturnsSimplifiedChinese(string source, string expected)
     {

@@ -22,7 +22,7 @@ public class QuotaAlertServiceTests
         service.OnStateChanged(Result(2, usedPercent: 4));
 
         var notification = Assert.Single(notifier.Notifications);
-        Assert.Equal("Codex 会话额度已增加", notification.Title);
+        Assert.Equal("Codex 5小时额度已增加", notification.Title);
         Assert.Equal("可用额度从 12% 增加到 96%。", notification.Body);
     }
 
@@ -93,7 +93,7 @@ public class QuotaAlertServiceTests
         service.OnStateChanged(Result(1, usedPercent: 0, email: "same@example.test"));
 
         var notification = Assert.Single(notifier.Notifications);
-        Assert.Equal("Codex 会话额度已恢复", notification.Title);
+        Assert.Equal("Codex 5小时额度已恢复", notification.Title);
         Assert.Equal("当前可用额度为 100%。", notification.Body);
     }
 

@@ -354,7 +354,7 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
         if (replenishments.Count == 1)
         {
             var replenishment = replenishments[0];
-            var window = UiText.TranslateLabel(replenishment.Current.Title);
+            var window = WindowLabelWithQuotaSuffix(replenishment.Current.Title);
             var verb = replenishment.Kind switch
             {
                 QuotaReplenishmentKind.ConfirmedCycleRenewal => "已刷新",
@@ -367,7 +367,7 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
                   $"增加到 {FormatPercent(replenishment.Current.AvailablePercent)}%。";
 
             return new QuotaAlertNotification(
-                $"{providerName} {window}额度{verb}",
+                $"{providerName} {window}{verb}",
                 body);
         }
 
@@ -396,8 +396,14 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
             : $" {UiText.FormatResetDescription(window.Window.ResetDescription)}。";
 
         return new QuotaAlertNotification(
-            $"{providerName} {UiText.TranslateLabel(window.Title)}额度已用 {used:0}%",
+            $"{providerName} {WindowLabelWithQuotaSuffix(window.Title)}已用 {used:0}%",
             $"已超过{(threshold.Severity == "critical" ? "严重" : "警告")}阈值（{threshold.Value:0}%）。{reset}");
+    }
+
+    private static string WindowLabelWithQuotaSuffix(string title)
+    {
+        var label = UiText.TranslateLabel(title);
+        return label.EndsWith("额度", StringComparison.Ordinal) ? label : label + "额度";
     }
 
     public static QuotaAlertNotification FromResetCreditExpiry(
@@ -406,9 +412,10 @@ internal sealed record QuotaAlertNotification(string Title, string Body)
         DateTimeOffset now)
     {
         var local = expiresAt.ToLocalTime();
+        var resetCreditsLabel = UiText.Get("Reset credits");
         return new QuotaAlertNotification(
-            $"{providerName} 重置机会即将到期",
-            $"最早的一次重置机会将在 {FormatTimeUntil(expiresAt, now)}后到期（{local:M月d日 HH:mm}），请在到期前使用。");
+            $"{providerName} {resetCreditsLabel}即将到期",
+            $"最早的一次{resetCreditsLabel}将在 {FormatTimeUntil(expiresAt, now)}后到期（{local:M月d日 HH:mm}），请在到期前使用。");
     }
 
     private static string FormatTimeUntil(DateTimeOffset target, DateTimeOffset now)

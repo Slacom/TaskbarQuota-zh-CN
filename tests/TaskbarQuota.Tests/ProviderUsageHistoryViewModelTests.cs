@@ -56,7 +56,7 @@ namespace TaskbarQuota.Tests
 
             Assert.Equal("35.4M Token", row.Reading);
             Assert.DoesNotContain('$', row.Reading);
-            Assert.Contains("成本不可用", row.TooltipText, StringComparison.Ordinal);
+            Assert.Contains("已用成本不可用", row.TooltipText, StringComparison.Ordinal);
         }
 
         [Fact]

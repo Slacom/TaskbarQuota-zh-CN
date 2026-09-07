@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.ViewModels
@@ -27,7 +28,7 @@ namespace TaskbarQuota.ViewModels
         [ObservableProperty] public partial string RingTooltip { get; private set; } = "Token 原始成本：$0.00";
         [ObservableProperty] public partial string RingAutomationName { get; private set; } = "Token 原始成本，$0.00";
         [ObservableProperty] public partial string PeriodSubtitle { get; private set; } = string.Empty;
-        [ObservableProperty] public partial string ChartTitle { get; private set; } = "每日成本";
+        [ObservableProperty] public partial string ChartTitle { get; private set; } = UiText.Get("Daily cost");
         [ObservableProperty] public partial Visibility ModelBreakdownVisibility { get; private set; } = Visibility.Visible;
         [ObservableProperty] public partial Visibility DayBreakdownVisibility { get; private set; } = Visibility.Collapsed;
 
@@ -162,7 +163,7 @@ namespace TaskbarQuota.ViewModels
             RingCenterUnit = SelectedMetric == "tokens" ? "Token" : "API 估算";
             RingTooltip = $"{HeadlineLabel}：{FormattedCenterValue}{Environment.NewLine}{HeadlineDetail}";
             RingAutomationName = $"{HeadlineLabel}，{FormattedCenterValue}。{PeriodSubtitle}。";
-            ChartTitle = SelectedMetric == "tokens" ? "每日已处理 Token" : "每日成本";
+            ChartTitle = SelectedMetric == "tokens" ? "每日已处理 Token" : UiText.Get("Daily cost");
 
             TotalTokensText = $"{totalTokens:N0}";
             TotalTokensDetail = $"活跃日均 {dailyAverage:N0}";

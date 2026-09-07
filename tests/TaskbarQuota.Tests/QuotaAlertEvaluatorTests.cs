@@ -136,8 +136,8 @@ public class QuotaAlertEvaluatorTests
         var alerts = QuotaAlertEvaluator.Evaluate(CodexResetCreditResult(expiresAt), Settings(), state, Now()).ToArray();
 
         var alert = Assert.Single(alerts);
-        Assert.Contains("重置机会即将到期", alert.Title);
-        Assert.Contains("最早的一次重置机会将在 5天后到期", alert.Body);
+        Assert.Contains("可用重置即将到期", alert.Title);
+        Assert.Contains("最早的一次可用重置将在 5天后到期", alert.Body);
     }
 
     [Fact]
@@ -210,7 +210,7 @@ public class QuotaAlertEvaluatorTests
             "Codex",
             [Replenishment("Session", 88, 0, QuotaReplenishmentKind.FullReplenishment)]);
 
-        Assert.Equal("Codex 会话额度已恢复", notification.Title);
+        Assert.Equal("Codex 5小时额度已恢复", notification.Title);
         Assert.Equal("当前可用额度为 100%。", notification.Body);
     }
 

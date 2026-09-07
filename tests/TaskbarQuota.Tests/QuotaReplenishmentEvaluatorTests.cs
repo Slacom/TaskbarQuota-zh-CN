@@ -379,7 +379,7 @@ public class QuotaReplenishmentEvaluatorTests
 
         var titles = QuotaAlertWindowCatalog.Enumerate(result).Select(window => window.Title).ToArray();
 
-        Assert.Equal(["每周", "每日", "代码审查", "每月"], titles);
+        Assert.Equal(["每周额度", "每日", "代码审查", "每月"], titles);
     }
 
     [Fact]

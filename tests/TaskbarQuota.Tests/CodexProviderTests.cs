@@ -2,6 +2,7 @@ using System.Text.Json;
 using TaskbarQuota.Usage.Providers;
 using TaskbarQuota.Controls;
 using TaskbarQuota.Usage;
+using TaskbarQuota.ViewModels;
 
 namespace TaskbarQuota.Tests;
 
@@ -150,7 +151,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "会话", "每周" }, labels);
+            Assert.Equal(new[] { "5小时额度", "每周额度" }, labels);
         }
         finally
         {
@@ -168,7 +169,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "会话", "每周", "Resets" }, labels);
+            Assert.Equal(new[] { "5小时额度", "每周额度", "Resets" }, labels);
         }
         finally
         {
@@ -186,7 +187,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "会话", "每周" }, labels);
+            Assert.Equal(new[] { "5小时额度", "每周额度" }, labels);
         }
         finally
         {
@@ -251,6 +252,30 @@ public class CodexProviderTests
         {
             WidgetSettingsService.ResetRowVisibilityForTesting();
         }
+    }
+
+    [Fact]
+    public void ProviderCard_ForCodex_HidesCreditsCard()
+    {
+        Assert.False(ProviderCardViewModel.ShouldShowCreditCard(ProviderId.Codex, "250 额度"));
+        Assert.True(ProviderCardViewModel.ShouldShowCreditCard(ProviderId.Copilot, "250 额度"));
+    }
+
+    [Fact]
+    public void ResetCreditLabels_UseAvailableResetLanguage()
+    {
+        var credit = new ResetCreditGrant(
+            "available",
+            DateTimeOffset.Parse("2026-06-12T03:43:26Z"),
+            DateTimeOffset.Parse("2026-07-12T03:43:26Z"));
+
+        var cardItem = new ResetCreditViewModel(1, credit);
+        var tooltip = WidgetSummary.WidgetResetCreditsTooltipLine(new ResetCreditsSnapshot(2, [credit]));
+
+        Assert.Equal("可用重置 1", cardItem.TokenTitle);
+        Assert.Contains("可用重置：", tooltip, StringComparison.Ordinal);
+        Assert.Contains("可用重置 1：", tooltip, StringComparison.Ordinal);
+        Assert.DoesNotContain("重置机会", tooltip, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -346,7 +371,7 @@ public class CodexProviderTests
 
             var labels = WidgetSummary.BuildRowLabelsForTesting(result, result.Fetch!.Usage);
 
-            Assert.Equal(new[] { "会话", "每周", "Spark 会话", "Spark 每周" }, labels);
+            Assert.Equal(new[] { "5小时额度", "每周额度", "Spark 会话", "Spark 每周" }, labels);
         }
         finally
         {

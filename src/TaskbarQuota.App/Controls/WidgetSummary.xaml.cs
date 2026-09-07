@@ -882,7 +882,10 @@ namespace TaskbarQuota.Controls
 
             var tokens = FormatHistoryTokens(today.Tokens);
             if (today.EstimatedCostUsd is not { } cost)
-                return $"\n今天：{tokens} · 成本不可用";
+            {
+                var costUnavailable = UiText.Get("Cost unavailable");
+                return $"\n今天：{tokens} · {costUnavailable}";
+            }
 
             var estimateMarker = today.EstimateComplete ? string.Empty : "*";
             return $"\n今天：估算 ${cost:F2}{estimateMarker} · {tokens}";
@@ -893,14 +896,15 @@ namespace TaskbarQuota.Controls
             return UiText.FormatTokens(tokens);
         }
 
-        private static string WidgetResetCreditsTooltipLine(ResetCreditsSnapshot? resetCredits)
+        internal static string WidgetResetCreditsTooltipLine(ResetCreditsSnapshot? resetCredits)
         {
             if (resetCredits is null)
                 return string.Empty;
 
+            var resetCreditsLabel = UiText.Get("Reset credits");
             var lines = new List<string>
             {
-                $"重置机会：{UiText.FormatAvailability(resetCredits.AvailableCount)}",
+                $"{resetCreditsLabel}：{UiText.FormatAvailability(resetCredits.AvailableCount)}",
             };
 
             int shown = 0;
@@ -909,12 +913,12 @@ namespace TaskbarQuota.Controls
                 var credit = resetCredits.Credits[i];
                 string granted = FormatLocalDateTime(credit.GrantedAt);
                 string expires = FormatLocalDateTime(credit.ExpiresAt);
-                lines.Add($"重置机会 {shown + 1}：发放于 {granted}，到期于 {expires}");
+                lines.Add($"{resetCreditsLabel} {shown + 1}：发放于 {granted}，到期于 {expires}");
                 shown++;
             }
 
             if (resetCredits.Credits.Count > shown)
-                lines.Add($"另有 {resetCredits.Credits.Count - shown} 次重置机会");
+                lines.Add($"另有 {resetCredits.Credits.Count - shown} 次{resetCreditsLabel}");
 
             return "\n" + string.Join("\n", lines);
         }
@@ -1789,7 +1793,7 @@ namespace TaskbarQuota.Controls
                 "Usage" => UiText.Get("Usage"),
                 "Balance" => UiText.Get("Balance"),
                 "Credits" => UiText.Get("Credits"),
-                "Resets" => "重置",
+                "Resets" => UiText.Get("Resets"),
                 "Add'l usage" => "额外用量",
                 "5h" => "5小时",
                 "Spark Session" => "Spark 会话",

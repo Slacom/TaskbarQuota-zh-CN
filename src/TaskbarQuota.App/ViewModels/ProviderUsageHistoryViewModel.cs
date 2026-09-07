@@ -104,12 +104,13 @@ namespace TaskbarQuota.ViewModels
             }
 
             var tokens = ProviderUsageHistoryViewModel.FormatTokens(period.Tokens);
+            var costUnavailable = UiText.Get("Cost unavailable");
             Reading = period.EstimatedCostUsd is { } cost
                 ? $"${cost:N2} · {tokens}"
                 : tokens;
             var figures = period.EstimatedCostUsd is { } exactCost
                 ? $"${exactCost:N2} · {period.Tokens:N0} Token"
-                : $"{period.Tokens:N0} Token · 成本不可用";
+                : $"{period.Tokens:N0} Token · {costUnavailable}";
             TooltipText = period.CostEstimated && period.EstimatedCostUsd.HasValue
                 ? $"{figures}\nAPI 等值估算；可能与订阅计费不同"
                 : figures;

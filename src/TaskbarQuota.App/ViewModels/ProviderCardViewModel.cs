@@ -122,7 +122,8 @@ namespace TaskbarQuota.ViewModels
 
         public ResetCreditViewModel(int index, ResetCreditGrant credit)
         {
-            TokenTitle = $"重置机会 {index}";
+            var resetCreditsLabel = UiText.Get("Reset credits");
+            TokenTitle = $"{resetCreditsLabel} {index}";
             ExpiresText = FormatNullableLocalDateTime(credit.ExpiresAt);
         }
 
@@ -418,7 +419,9 @@ namespace TaskbarQuota.ViewModels
                 : Visibility.Visible;
             EmailVisibility = string.IsNullOrEmpty(Email) ? Visibility.Collapsed : Visibility.Visible;
             CostVisibility = string.IsNullOrEmpty(CostText) ? Visibility.Collapsed : Visibility.Visible;
-            CreditVisibility = string.IsNullOrEmpty(CreditLeftText) ? Visibility.Collapsed : Visibility.Visible;
+            CreditVisibility = ShouldShowCreditCard(r.Id, CreditLeftText)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             SourceVisibility = string.IsNullOrEmpty(SourceText) ? Visibility.Collapsed : Visibility.Visible;
             IsSetupRequired = !ok && r.ErrorKind == ProviderErrorKind.NotInstalled;
             IsOAuthLoginRequired = !ok && r.ErrorKind == ProviderErrorKind.AuthRequired
@@ -541,6 +544,9 @@ namespace TaskbarQuota.ViewModels
             ProviderId.Copilot => "代码补全",
             _ => UiText.Get("Model"),
         };
+
+        internal static bool ShouldShowCreditCard(ProviderId providerId, string? creditLeftText)
+            => providerId != ProviderId.Codex && !string.IsNullOrEmpty(creditLeftText);
 
         internal static bool ShouldShowModelBreakdown(ProviderId providerId, int modelCount)
             => providerId != ProviderId.Codex && modelCount > 0;

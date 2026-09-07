@@ -58,7 +58,7 @@ public class WidgetCreditValueSampleTests
         };
 
         Assert.Equal(
-            "\n今天：1.5M Token · 成本不可用",
+            "\n今天：1.5M Token · 已用成本不可用",
             WidgetSummary.WidgetUsageHistoryTooltipLine(history));
     }
 }

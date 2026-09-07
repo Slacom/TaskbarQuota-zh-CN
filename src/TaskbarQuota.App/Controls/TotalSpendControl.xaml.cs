@@ -145,7 +145,7 @@ namespace TaskbarQuota.Controls
 
             var flyout = new MenuFlyout();
             flyout.Items.Add(CreateShareItem("摘要", 1));
-            flyout.Items.Add(CreateShareItem("摘要和每日成本", 2));
+            flyout.Items.Add(CreateShareItem("摘要和" + UiText.Get("Daily cost"), 2));
             flyout.Items.Add(CreateShareItem("全部内容", 3));
             flyout.ShowAt(button);
         }
@@ -495,7 +495,7 @@ namespace TaskbarQuota.Controls
         private static string BuildDayTooltip(UsageChartDayViewModel point)
         {
             var providers = string.Join(Environment.NewLine, point.Providers.Select(provider =>
-                $"{provider.ProviderName}：{provider.Tokens:N0} Token · {(provider.CostUsd.HasValue ? $"${provider.CostUsd.Value:F2}" : "成本不可用")}"));
+                $"{provider.ProviderName}：{provider.Tokens:N0} Token · {(provider.CostUsd.HasValue ? $"${provider.CostUsd.Value:F2}" : UiText.Get("Cost unavailable"))}"));
             var totalCost = $"${point.CostUsd:F2}{(point.CostComplete ? string.Empty : "*")}";
             return $"{point.Date:M月d日 dddd}{Environment.NewLine}{point.TotalTokens:N0} Token · {totalCost}{(providers.Length > 0 ? Environment.NewLine + providers : string.Empty)}";
         }
