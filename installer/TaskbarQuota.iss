@@ -7,6 +7,15 @@
 #ifndef MyAppExeName
   #define MyAppExeName "TaskbarQuota.exe"
 #endif
+#ifndef MyAppId
+  #define MyAppId "{{A7C4E2B1-9F3D-4A8E-B5C6-1D2E3F4A5B6C}"
+#endif
+#ifndef MyDefaultDir
+  #define MyDefaultDir "{autopf}\TaskbarQuota"
+#endif
+#ifndef MyDefaultGroupName
+  #define MyDefaultGroupName "TaskbarQuota"
+#endif
 #ifndef PublishDir
   #define PublishDir "..\src\TaskbarQuota.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 #endif
@@ -29,15 +38,15 @@
 #endif
 
 [Setup]
-AppId={{A7C4E2B1-9F3D-4A8E-B5C6-1D2E3F4A5B6C}
+AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=Zied Kallel
 AppPublisherURL=https://github.com/zioder/TaskbarQuota
 AppSupportURL=https://github.com/zioder/TaskbarQuota/issues
 AppUpdatesURL=https://github.com/zioder/TaskbarQuota/releases
-DefaultDirName={autopf}\TaskbarQuota
-DefaultGroupName=TaskbarQuota
+DefaultDirName={#MyDefaultDir}
+DefaultGroupName={#MyDefaultGroupName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=TaskbarQuotaSetup-{#MyAppVersion}-{#TargetArch}
