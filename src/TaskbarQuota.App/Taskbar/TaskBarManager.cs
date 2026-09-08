@@ -22,7 +22,8 @@ namespace TaskbarQuota.Taskbar
     /// </summary>
     internal static class TaskBarManager
     {
-        private static TrayIconWithContextMenu? _trayIcon;
+        private static TrayIcon? _trayIcon;
+        private static PopupMenu? _trayMenu;
         private static System.Drawing.Icon? _trayIconSource;
         private static readonly Dictionary<IntPtr, TaskBarWidget> Widgets = new();
         // Reused snapshot of Widgets.Values, so iterating it while a callback may mutate the dictionary
@@ -304,6 +305,10 @@ namespace TaskbarQuota.Taskbar
             var move = new PopupMenuItem(UiText.Get("Move usage widget"), (_, _) => _dispatcher?.TryEnqueue(StartMoveActiveSurface));
             var reset = new PopupMenuItem(UiText.Get("Reset widget positions"), (_, _) => _dispatcher?.TryEnqueue(ResetActiveSurfacePositions));
             var quit = new PopupMenuItem(UiText.Get("Quit"), (_, _) => _dispatcher?.TryEnqueue(App.Quit));
+            _trayMenu = new PopupMenu
+            {
+                Items = { open, activity, new PopupMenuSeparator(), move, reset, new PopupMenuSeparator(), quit },
+            };
 
             System.Drawing.Icon? icon = null;
             try
@@ -316,9 +321,12 @@ namespace TaskbarQuota.Taskbar
             }
             catch { }
 
-            _trayIcon = new TrayIconWithContextMenu
+            // TrayIconWithContextMenu owns a second menu thread. In an unpackaged WinUI process that path
+            // can surface a stowed WinRT exception from H.NotifyIcon and terminate the process (the tray
+            // window is also why the dialog title begins with H.NotifyIcon_...). Keep the icon on the app
+            // thread and explicitly marshal the native menu there instead.
+            _trayIcon = new TrayIcon
             {
-                ContextMenu = new PopupMenu { Items = { open, activity, new PopupMenuSeparator(), move, reset, new PopupMenuSeparator(), quit } },
                 ToolTip = "TaskbarQuota",
             };
             _trayIcon.Create();
@@ -329,9 +337,41 @@ namespace TaskbarQuota.Taskbar
             }
             _trayIcon.MessageWindow.MouseEventReceived += (_, e) =>
             {
-                if (e.MouseEvent is MouseEvent.IconLeftMouseUp or MouseEvent.IconLeftDoubleClick)
-                    _dispatcher?.TryEnqueue(() => _showMainWindow?.Invoke());
+                try
+                {
+                    if (e.MouseEvent is MouseEvent.IconLeftMouseUp or MouseEvent.IconLeftDoubleClick)
+                        _dispatcher?.TryEnqueue(() => _showMainWindow?.Invoke());
+                    else if (IsTrayContextMenuEvent(e.MouseEvent))
+                        _dispatcher?.TryEnqueue(() => ShowTrayContextMenu(e.Point));
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Tray icon mouse event could not be handled");
+                }
             };
+        }
+
+        internal static bool IsTrayContextMenuEvent(MouseEvent mouseEvent)
+            => mouseEvent == MouseEvent.IconRightMouseUp;
+
+        private static void ShowTrayContextMenu(System.Drawing.Point point)
+        {
+            var icon = _trayIcon;
+            var menu = _trayMenu;
+            if (icon is null || menu is null || !icon.IsCreated)
+                return;
+
+            try
+            {
+                menu.Show(icon.MessageWindow.Handle, point.X, point.Y);
+            }
+            catch (Exception ex)
+            {
+                // A shell restart or Explorer transition can invalidate the tray owner between the
+                // message callback and this queued action. A missing menu is recoverable; a process-wide
+                // unhandled exception from the tray thread is not.
+                Log.Warning(ex, "Tray context menu could not be shown");
+            }
         }
 
         private static void StartMoveActiveSurface()
@@ -1112,7 +1152,13 @@ namespace TaskbarQuota.Taskbar
                 topologyWatcher.Dispose();
                 _sessionTopologyWatcher = null;
             }
-            if (_trayIcon != null) { _trayIcon.TryRemove(); _trayIcon.Dispose(); _trayIcon = null; }
+            if (_trayIcon != null)
+            {
+                try { _trayIcon.TryRemove(); } catch (Exception ex) { Log.Warning(ex, "Failed to remove tray icon"); }
+                try { _trayIcon.Dispose(); } catch (Exception ex) { Log.Warning(ex, "Failed to dispose tray icon"); }
+                _trayIcon = null;
+            }
+            _trayMenu = null;
             try { _flyout?.Close(); } catch { }
             _flyout = null;
             DisposeFloatingWindow();
