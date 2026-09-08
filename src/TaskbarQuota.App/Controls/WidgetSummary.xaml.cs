@@ -275,6 +275,22 @@ namespace TaskbarQuota.Controls
                 return;
             }
 
+            if (ShouldRenderNeutralCodexQuota(result))
+            {
+                // A failure fallback still carries the previous Fetch so other consumers can retain
+                // continuity, but those numbers are not confirmed by this refresh. Never present them
+                // as current Codex subscription quota (issue #27).
+                _rows = BuildCodexUnavailableRows(result);
+                RenderRows();
+                AnimateRender(isFirstReveal, providerSwitch: providerChanged);
+                var sourceText = result.Source.IsKnown ? $" {result.Source.ShortViaText}" : "";
+                var reason = result.ObservationOrigin == UsageObservationOrigin.FailureFallback
+                    ? "网络暂不可用，暂不显示上次额度。"
+                    : result.Error ?? "无法获取真实额度。";
+                ToolTipService.SetToolTip(this, $"{widgetName}{sourceText}：{reason}");
+                return;
+            }
+
             if (!result.Ok || result.Fetch is null)
             {
                 // Claude needs an interactive OAuth login — say so instead of a red blank bar.
@@ -574,6 +590,28 @@ namespace TaskbarQuota.Controls
 
             return BuildBaseRows(result, usage);
         }
+
+        private static bool ShouldRenderNeutralCodexQuota(UsageResult result)
+            => result.Id == ProviderId.Codex
+                && (result.ObservationOrigin == UsageObservationOrigin.FailureFallback
+                    || (!result.Ok
+                        && result.ErrorKind is not ProviderErrorKind.AuthRequired
+                        and not ProviderErrorKind.NotInstalled));
+
+        private static List<WidgetUsageRow> BuildCodexUnavailableRows(UsageResult result)
+            => new()
+            {
+                new WidgetUsageRow(CompactLabel(result.Provider?.SessionLabel ?? "Usage"), 0, "--", HasBar: false),
+                new WidgetUsageRow(CompactLabel(result.Provider?.WeeklyLabel ?? "Usage"), 0, "--", HasBar: false),
+            };
+
+        internal static IReadOnlyList<(string Label, string Value, bool HasBar)> BuildCodexUnavailableRowsForTesting(UsageResult result)
+            => BuildCodexUnavailableRows(result)
+                .Select(row => (row.Label, row.Value, row.HasBar))
+                .ToList();
+
+        internal static bool ShouldRenderNeutralCodexQuotaForTesting(UsageResult result)
+            => ShouldRenderNeutralCodexQuota(result);
 
         internal static IReadOnlyList<string> BuildRowLabelsForTesting(UsageResult result, UsageSnapshot usage)
             => BuildRows(result, usage).Select(row => row.Label).ToList();
@@ -1601,6 +1639,7 @@ namespace TaskbarQuota.Controls
                 result.Error ?? string.Empty,
                 result.IsPending ? "pending" : "settled",
                 result.IsStale ? "stale" : "live",
+                result.ObservationOrigin.ToString(),
                 result.Source.Kind.ToString(),
                 result.Source.DisplayName,
             };
@@ -1643,6 +1682,9 @@ namespace TaskbarQuota.Controls
 
             return string.Join("|", parts);
         }
+
+        internal static string BuildRenderSignatureForTesting(UsageResult result)
+            => BuildRenderSignature(result);
 
         private static void AppendRateWindow(List<string> parts, RateWindow? window)
         {

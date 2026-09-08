@@ -10,18 +10,16 @@ namespace TaskbarQuota.Services;
 /// Decides whether a provider can be pinned, by the only measure that matters: whether its tile fits the
 /// free space the taskbar actually has.
 ///
-/// A pinned tile is never trimmed or reduced — it renders exactly the rows the user configured — so a set
-/// that does not fit has to be refused up front rather than rendered badly. There is deliberately no
-/// second, abstract allowance on top of this. An earlier weight budget (a provider costing one or two
+    /// A pinned tile is never trimmed or reduced — it renders exactly the rows the user configured — so a set
+    /// that does not fit is held back by the widget until space is available. The persisted pin preference is
+    /// never changed by a measurement or refresh. There is deliberately no second, abstract allowance on top
+    /// of this. An earlier weight budget (a provider costing one or two
 /// "slots" out of five) both duplicated this check and contradicted it: three three-row providers come to
 /// 1241px, which fits a left-aligned taskbar comfortably, yet cost six slots and were refused. Measured
 /// space is the rule; anything else is a guess that eventually says no to something that plainly works.
 /// </summary>
 public static class PinBudgetService
 {
-    /// <summary>Raised after the budget auto-unpins providers, so the UI can refresh and explain.</summary>
-    public static event Action<IReadOnlyList<ProviderId>>? ProvidersUnpinned;
-
     /// <summary>
     /// Free width the pin budget uses for the current surface. Floating mode is constrained only by the
     /// tile cap; its host scrolls horizontally when content is wider than the monitor work area.
@@ -155,14 +153,14 @@ public static class PinBudgetService
     }
 
     /// <summary>
-    /// Brings the pinned set back inside the taskbar by unpinning the least recently used providers, and
-    /// reports which went. Called after anything that can change a tile's width — enabling a row on a
-    /// pinned provider can add a whole column group, and a display setting must never be refused because
-    /// of an unrelated pin.
+    /// Checks which pinned providers would be held back by the current taskbar budget. This is deliberately
+    /// non-mutating: a transient taskbar span, a refresh, or a row-width change must not erase a user's pin
+    /// preference. The widget applies the returned policy in memory and shows the tile again when space
+    /// returns.
     /// </summary>
     /// <param name="notify">
-    /// False when the caller raises <see cref="WidgetSettingsService.Changed"/> itself straight after, so
-    /// one user action does not rebuild the nav badges, the flyout strip and every widget tile twice.
+    /// The parameter is retained for source compatibility with callers from earlier releases; budget checks
+    /// no longer raise a second settings notification because they never mutate settings.
     /// </param>
     public static IReadOnlyList<ProviderId> EnforceBudget(bool notify = true)
     {
@@ -204,19 +202,11 @@ public static class PinBudgetService
             dropped.Add(provider);
         }
 
-        foreach (var provider in dropped)
-            WidgetSettingsService.SetProviderPinnedSilent(provider, false);
-
         if (dropped.Count > 0)
         {
-            // The set just changed, so the key computed above is stale. Recompute rather than clear, or the
-            // next tick redoes the whole sort to reach the same answer.
-            _lastBudgetKey = BudgetKey();
-            if (notify)
-                WidgetSettingsService.SaveProviderPinsAndNotify();
-            else
-                WidgetSettingsService.SaveProviderPins();
-            ProvidersUnpinned?.Invoke(dropped);
+            Diagnostics.Log.Debug(
+                $"[pin] retaining preferences; widget may hold back {string.Join(", ", dropped)} "
+                + $"until the current budget ({available}) fits");
         }
 
         return dropped;

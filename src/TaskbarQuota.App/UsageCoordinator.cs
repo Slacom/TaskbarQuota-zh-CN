@@ -607,7 +607,7 @@ namespace TaskbarQuota
         {
             try
             {
-                var fresh = (await _service.FetchAsync(targetProvider, force: true).ConfigureAwait(false))
+                var fresh = (await FetchAndRecordAsync(targetProvider, force: true).ConfigureAwait(false))
                     .WithSource(SourceFor(targetProvider));
                 if (!await _gate.WaitAsync(0).ConfigureAwait(false))
                     return;
@@ -717,7 +717,7 @@ namespace TaskbarQuota
 
             try
             {
-                var fresh = (await _service.FetchAsync(target, force: true).ConfigureAwait(false))
+                var fresh = (await FetchAndRecordAsync(target, force: true).ConfigureAwait(false))
                     .WithSource(SourceFor(target));
                 if (!fresh.Ok)
                     ForgetOpenCodeProviderObservation(target);
@@ -851,7 +851,7 @@ namespace TaskbarQuota
 
             try
             {
-                var fresh = (await _service.FetchAsync(target, force: true).ConfigureAwait(false))
+                var fresh = (await FetchAndRecordAsync(target, force: true).ConfigureAwait(false))
                     .WithSource(SourceFor(target));
                 await _gate.WaitAsync().ConfigureAwait(false);
                 try
@@ -873,11 +873,26 @@ namespace TaskbarQuota
             }
         }
 
+        /// <summary>
+        /// Central fetch wrapper so provider discovery sees every result produced by the coordinator,
+        /// including failures and cached fallbacks. Keeping this at the boundary avoids making the usage
+        /// registry depend on the app-level visibility policy.
+        /// </summary>
+        private async Task<UsageResult> FetchAndRecordAsync(
+            ProviderId provider,
+            bool force = false,
+            CancellationToken ct = default)
+        {
+            var result = await _service.FetchAsync(provider, force, ct).ConfigureAwait(false);
+            ProviderDiscoveryService.RecordFetchResult(result);
+            return result;
+        }
+
         private async Task<bool> RefreshProviderCacheSilentlyAsync(ProviderId provider)
         {
             try
             {
-                var result = await _service.FetchAsync(provider, force: true).ConfigureAwait(false);
+                var result = await FetchAndRecordAsync(provider, force: true).ConfigureAwait(false);
                 return result.Ok;
             }
             catch (Exception ex)
@@ -920,7 +935,7 @@ namespace TaskbarQuota
 
             try
             {
-                var result = (await _service.FetchAsync(id).ConfigureAwait(false)).WithSource(SourceFor(id));
+                var result = (await FetchAndRecordAsync(id).ConfigureAwait(false)).WithSource(SourceFor(id));
                 StateChanged?.Invoke(result);
             }
             catch (Exception ex)
@@ -938,7 +953,7 @@ namespace TaskbarQuota
         public async Task<IReadOnlyList<UsageResult>> FetchAllAsync(bool force = false)
         {
             var tasks = _service.All
-                .Select(p => Task.Run(() => _service.FetchAsync(p.Id, force)))
+                .Select(p => Task.Run(() => FetchAndRecordAsync(p.Id, force)))
                 .ToArray();
             var results = await Task.WhenAll(tasks).ConfigureAwait(false);
             var sourcedResults = results.Select(result => result.WithSource(SourceFor(result.Id))).ToArray();
@@ -954,7 +969,7 @@ namespace TaskbarQuota
             var active = ActiveProvider;
             var tasks = _service.All
                 .Where(p => force || ProviderDiscoveryService.ShouldFetch(p.Id, active))
-                .Select(p => Task.Run(() => _service.FetchAsync(p.Id, force, ct), ct))
+                .Select(p => Task.Run(() => FetchAndRecordAsync(p.Id, force, ct), ct))
                 .ToList();
 
             while (tasks.Count > 0)
@@ -984,7 +999,7 @@ namespace TaskbarQuota
         }
 
         private async Task<UsageResult> FetchWarmUpResultAsync(IUsageProvider provider)
-            => await _service.FetchAsync(provider.Id, force: true).ConfigureAwait(false);
+            => await FetchAndRecordAsync(provider.Id, force: true).ConfigureAwait(false);
 
         private static void LogWarmUpResult(UsageResult r)
         {
@@ -1123,7 +1138,7 @@ namespace TaskbarQuota
             if (!await _gate.WaitAsync(0).ConfigureAwait(false)) return;
             try
             {
-                var result = await _service.FetchAsync(target, force).ConfigureAwait(false);
+                var result = await FetchAndRecordAsync(target, force).ConfigureAwait(false);
                 result = result.WithSource(SourceFor(target));
 
                 // The active provider may have changed while we awaited the network; if so, drop this
@@ -1166,7 +1181,7 @@ namespace TaskbarQuota
             if (WidgetDisplayProvider is not { } widgetTarget || widgetTarget == published)
                 return;
 
-            var widgetResult = await _service.FetchAsync(widgetTarget, force).ConfigureAwait(false);
+            var widgetResult = await FetchAndRecordAsync(widgetTarget, force).ConfigureAwait(false);
             StateChanged?.Invoke(widgetResult.WithSource(SourceFor(widgetTarget)));
         }
 
