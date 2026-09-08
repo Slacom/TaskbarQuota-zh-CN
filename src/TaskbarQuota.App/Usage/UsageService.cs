@@ -139,7 +139,7 @@ namespace TaskbarQuota.Usage
                 }
 
                 if (pe.Kind is not ProviderErrorKind.AuthRequired and not ProviderErrorKind.NotInstalled
-                    && TryCreateLocalHistoryResult(id, provider, out var localResult))
+                    && TryCreateLocalHistoryResult(id, provider, observationSequence, out var localResult))
                 {
                     Store(id, localResult, FetchCachePolicy.TtlForFailure(pe.Kind));
                     return localResult;
@@ -156,7 +156,7 @@ namespace TaskbarQuota.Usage
             catch (Exception ex)
             {
                 Log.Warning(ex, $"Usage provider {id} fetch failed");
-                if (TryCreateLocalHistoryResult(id, provider, out var localResult))
+                if (TryCreateLocalHistoryResult(id, provider, observationSequence, out var localResult))
                 {
                     Store(id, localResult, FetchCachePolicy.TtlForFailure(null));
                     return localResult;
@@ -332,6 +332,7 @@ namespace TaskbarQuota.Usage
         private static bool TryCreateLocalHistoryResult(
             ProviderId id,
             IUsageProvider provider,
+            long observationSequence,
             out UsageResult result)
         {
             if (!UsageHistoryService.TryLoad(id, out var history))
@@ -347,7 +348,8 @@ namespace TaskbarQuota.Usage
             result = UsageResult.Success(
                 id,
                 provider,
-                new ProviderFetchResult(usage, "Local usage history"));
+                new ProviderFetchResult(usage, "Local usage history"))
+                .AsLocalHistoryFallback(observationSequence, DateTimeOffset.Now);
             return true;
         }
 
@@ -488,6 +490,7 @@ namespace TaskbarQuota.Usage
         MemoryCache,
         RestoredSnapshot,
         FailureFallback,
+        LocalHistoryFallback,
     }
 
     public sealed class UsageResult
@@ -561,6 +564,7 @@ namespace TaskbarQuota.Usage
                 {
                     UsageObservationOrigin.FailureFallback => UsageObservationOrigin.FailureFallback,
                     UsageObservationOrigin.RestoredSnapshot => UsageObservationOrigin.RestoredSnapshot,
+                    UsageObservationOrigin.LocalHistoryFallback => UsageObservationOrigin.LocalHistoryFallback,
                     _ => UsageObservationOrigin.MemoryCache,
                 },
                 ObservationSequence,
@@ -569,6 +573,9 @@ namespace TaskbarQuota.Usage
 
         internal UsageResult AsFailureFallback(long sequence, DateTimeOffset observedAt)
             => WithObservation(UsageObservationOrigin.FailureFallback, sequence, observedAt, isStale: false);
+
+        internal UsageResult AsLocalHistoryFallback(long sequence, DateTimeOffset observedAt)
+            => WithObservation(UsageObservationOrigin.LocalHistoryFallback, sequence, observedAt, isStale: false);
 
         private UsageResult WithStale(bool isStale)
             => WithObservation(ObservationOrigin, ObservationSequence, ObservedAt, isStale);

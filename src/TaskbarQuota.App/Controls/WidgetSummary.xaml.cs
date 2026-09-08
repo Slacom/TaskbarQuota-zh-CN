@@ -593,7 +593,8 @@ namespace TaskbarQuota.Controls
 
         private static bool ShouldRenderNeutralCodexQuota(UsageResult result)
             => result.Id == ProviderId.Codex
-                && (result.ObservationOrigin == UsageObservationOrigin.FailureFallback
+                && (result.ObservationOrigin is UsageObservationOrigin.FailureFallback
+                    or UsageObservationOrigin.LocalHistoryFallback
                     || (!result.Ok
                         && result.ErrorKind is not ProviderErrorKind.AuthRequired
                         and not ProviderErrorKind.NotInstalled));

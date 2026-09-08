@@ -44,6 +44,40 @@ public class FetchCachePolicyTests
     }
 
     [Fact]
+    public async Task FetchAsync_UnexpectedExceptionWithLocalHistory_MarksResultAsUnconfirmed()
+    {
+        var directory = Directory.CreateTempSubdirectory("taskbarquota-codex-history-");
+        string? previousCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            File.WriteAllText(
+                Path.Combine(sessions.FullName, "2026-09-08.jsonl"),
+                "{\"timestamp\":\"2026-09-08T10:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5\"}}\n"
+                + "{\"timestamp\":\"2026-09-08T10:01:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}}\n");
+            Environment.SetEnvironmentVariable("CODEX_HOME", directory.FullName);
+
+            var service = new UsageService();
+            var provider = new FlakyProvider(ProviderId.Codex)
+            {
+                NextUnexpectedException = new InvalidOperationException("network unavailable"),
+            };
+            service.Register(provider);
+
+            var result = await service.FetchAsync(ProviderId.Codex, force: true);
+
+            Assert.True(result.Ok);
+            Assert.Equal(UsageObservationOrigin.LocalHistoryFallback, result.ObservationOrigin);
+            Assert.Equal("Local usage history", result.Fetch!.SourceLabel);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", previousCodexHome);
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FetchAsync_RateLimitedAfterSuccess_ReturnsLastSuccessfulLiveResult()
     {
         var service = new UsageService();

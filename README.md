@@ -27,7 +27,7 @@ TaskbarQuota 是一款原生 Windows 应用，适合同时使用多个 AI 编程
 
 - 可从 [Microsoft Store](https://apps.microsoft.com/detail/9n3kl49vfpvn?hl=zh-CN&gl=CN&mode=direct) 安装官方版本。
 - 也可以从 [GitHub Releases](https://github.com/Slacom/TaskbarQuota-zh-CN/releases/latest) 下载 x64 或 arm64 安装包。
-- `TaskbarQuota-1.3.2.2-x64-zh-CN-portable.zip` 是无需安装的便携版本。
+- `TaskbarQuota-1.3.2.3-x64-zh-CN-portable.zip` 是无需安装的便携版本。
 
 GitHub 安装包目前未签名，Windows SmartScreen 可能会要求确认。请先核对发布页中的文件名和 SHA-256，再根据需要选择“更多信息”→“仍要运行”。
 
@@ -156,13 +156,13 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 
 TaskbarQuota 使用 [MIT License](LICENSE) 发布。
 
-## 本次中文分支修改（1.3.2.2）
+## 本次中文分支修改（1.3.2.3）
 
 本分支基于上游 [TaskbarQuota](https://github.com/zioder/TaskbarQuota)，并发布到 [Slacom/TaskbarQuota-zh-CN](https://github.com/Slacom/TaskbarQuota-zh-CN)：
 
 - 完成主要界面、动态状态、服务名称、额度标签和通知文案的简体中文本地化；
 - 使用独立的中文安装器名称、AppId 和默认安装目录 `TaskbarQuota-zh-CN`，避免与英文版互相覆盖；
-- 修复 OpenAI/Codex 网络不可用时错误显示过期订阅额度的问题，改为两行中性 `--` 占位；
+- 修复 OpenAI/Codex 网络不可用时错误显示过期订阅额度的问题，改为两行中性 `--` 占位；本地会话历史也不会伪装成实时额度；
 - 修复任务栏空间重新测量或刷新时自动取消用户固定的问题，固定偏好会保留；
 - 隔离托盘上下文菜单的线程和异常路径，降低非打包 WinUI 应用因 H.NotifyIcon 菜单导致崩溃的风险；
 - 接通服务发现取数结果，完善“隐藏不可用服务”的即时、可逆行为；
