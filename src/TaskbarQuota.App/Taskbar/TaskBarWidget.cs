@@ -1,4 +1,5 @@
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
@@ -21,6 +22,7 @@ using TaskbarQuota.Interop;
 using TaskbarQuota.Usage;
 using TaskbarQuota.AgentActivity;
 using Anim = Microsoft.UI.Xaml.Media.Animation;
+using UiDispatcherPriority = Microsoft.UI.Dispatching.DispatcherQueuePriority;
 
 namespace TaskbarQuota.Taskbar
 {
@@ -141,6 +143,9 @@ namespace TaskbarQuota.Taskbar
         private ProviderId? pendingActiveProvider;
         private bool isRecomputingLayout;
         private bool layoutRepositionPending;
+        // Width changes are raised while a tile is mutating its XAML tree. Recompute on the next dispatcher
+        // turn so resizing the native island cannot re-enter the XAML layout pass.
+        private bool layoutRecomputeQueued;
         // Null until the first pass, so that pass always logs. A plain int seeded at 0 could match the first
         // real hash and swallow the only line that says whether the widget ever laid its tiles out.
         private int? lastLayoutHash;
@@ -800,7 +805,30 @@ namespace TaskbarQuota.Taskbar
 
         private void OnActivityClicked(AgentActivityItem? item) => ActivityClicked?.Invoke(item);
 
-        private void WidgetSummary_DesiredHostWidthChanged(int logicalWidth) => RecomputeLayout();
+        private void WidgetSummary_DesiredHostWidthChanged(int logicalWidth)
+        {
+            if (!ShouldQueueDesiredWidthRecompute(layoutRecomputeQueued, disposedValue))
+                return;
+
+            var dispatcher = summaryPanel?.DispatcherQueue;
+            if (dispatcher is null)
+                return;
+
+            layoutRecomputeQueued = true;
+            if (!dispatcher.TryEnqueue(UiDispatcherPriority.Low, () =>
+            {
+                layoutRecomputeQueued = false;
+                if (!disposedValue && summaryPanel is not null)
+                    RecomputeLayout();
+            }))
+            {
+                layoutRecomputeQueued = false;
+                Log.Warning("Could not enqueue widget width recompute on the UI thread");
+            }
+        }
+
+        internal static bool ShouldQueueDesiredWidthRecompute(bool alreadyQueued, bool disposed)
+            => !alreadyQueued && !disposed;
 
         public void SetActivitySnapshot(AgentActivitySnapshot snapshot, bool allowEmptyGrace = true)
         {
@@ -3441,6 +3469,7 @@ namespace TaskbarQuota.Taskbar
             activitySummary = null;
             pendingProviders = null;
             pendingActiveProvider = null;
+            layoutRecomputeQueued = false;
             Array.Clear(tiles);
             Array.Clear(separators);
             Array.Clear(tileProviders);
