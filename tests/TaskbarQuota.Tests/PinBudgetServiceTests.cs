@@ -10,6 +10,7 @@ namespace TaskbarQuota.Tests;
 /// Pinning is limited by one thing: whether the tiles fit the taskbar space actually measured. A pinned
 /// tile is never trimmed, so a set that would not fit has to be refused rather than rendered badly.
 /// </summary>
+[Collection(WidgetRowSettingsCollection.Name)]
 public class PinBudgetServiceTests
 {
     // Measured tile widths: a two-row provider renders around 223px, a three-row one around 405px.

@@ -438,6 +438,7 @@ public static class WidgetSettingsService
 
         AutoHideUnavailable = enabled;
         Save(AutoHideUnavailablePath, enabled ? 1 : 0);
+        ProviderDiscoveryService.ReconcileUnavailableVisibility();
         DashboardCompositionChanged?.Invoke(null, EventArgs.Empty);
         Changed?.Invoke(null, EventArgs.Empty);
     }

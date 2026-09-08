@@ -3,6 +3,7 @@ using TaskbarQuota.Usage;
 
 namespace TaskbarQuota.Tests;
 
+[Collection(WidgetRowSettingsCollection.Name)]
 public class ProviderDiscoveryServiceTests
 {
     public ProviderDiscoveryServiceTests()
@@ -10,6 +11,7 @@ public class ProviderDiscoveryServiceTests
         ProviderDiscoveryService.ResetForTesting();
         WidgetSettingsService.ResetProviderVisibilityForTesting();
         WidgetSettingsService.ResetDashboardProviderVisibilityForTesting();
+        WidgetSettingsService.ResetProviderPinsForTesting();
         WidgetSettingsService.ApplyAutoHideUnavailable(true);
         ProviderInstallDetector.IsInstalledOverrideForTesting = _ => false;
         ProviderInstallDetector.ResetCliCacheForTesting();
@@ -168,5 +170,54 @@ public class ProviderDiscoveryServiceTests
 
         Assert.False(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: null));
         Assert.True(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: ProviderId.Grok));
+    }
+
+    [Fact]
+    public void EnablingAutoHideImmediatelyHidesKnownNotInstalledProvider()
+    {
+        bool previous = WidgetSettingsService.AutoHideUnavailable;
+        try
+        {
+            WidgetSettingsService.ApplyAutoHideUnavailable(false);
+            ProviderDiscoveryService.RecordFetchResult(
+                UsageResult.Failure(ProviderId.Grok, "not installed", kind: ProviderErrorKind.NotInstalled));
+
+            Assert.True(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+            Assert.True(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
+
+            WidgetSettingsService.ApplyAutoHideUnavailable(true);
+
+            Assert.False(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+            Assert.False(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
+        }
+        finally
+        {
+            WidgetSettingsService.ApplyAutoHideUnavailable(previous);
+        }
+    }
+
+    [Fact]
+    public void DisablingAutoHideRestoresAutomaticHideWithoutLosingPin()
+    {
+        bool previous = WidgetSettingsService.AutoHideUnavailable;
+        try
+        {
+            WidgetSettingsService.SetProviderPinnedForTesting(ProviderId.Grok, true);
+            ProviderDiscoveryService.RecordFetchResult(
+                UsageResult.Failure(ProviderId.Grok, "not installed", kind: ProviderErrorKind.NotInstalled));
+
+            Assert.False(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
+            Assert.True(WidgetSettingsService.IsProviderPinned(ProviderId.Grok));
+
+            WidgetSettingsService.ApplyAutoHideUnavailable(false);
+
+            Assert.True(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+            Assert.True(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
+            Assert.True(WidgetSettingsService.IsProviderPinned(ProviderId.Grok));
+        }
+        finally
+        {
+            WidgetSettingsService.ApplyAutoHideUnavailable(previous);
+        }
     }
 }
