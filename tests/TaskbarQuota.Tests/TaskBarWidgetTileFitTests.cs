@@ -50,4 +50,16 @@ public class TaskBarWidgetTileFitTests
 
         Assert.Equal(0, TaskBarWidget.RecencyOf(ProviderId.Codex, recent));
     }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void DesiredWidthUpdatesAreCoalescedAndIgnoredAfterDispose(
+        bool alreadyQueued,
+        bool disposed,
+        bool expected)
+        => Assert.Equal(
+            expected,
+            TaskBarWidget.ShouldQueueDesiredWidthRecompute(alreadyQueued, disposed));
 }
