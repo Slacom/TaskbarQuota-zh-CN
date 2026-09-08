@@ -25,6 +25,33 @@ public class CodexOfflineWidgetTests
             rows);
     }
 
+    [Fact]
+    public void LocalHistoryFallback_RendersNeutralChineseQuotaRows()
+    {
+        var localHistoryFallback = LiveCodexResult(12, 34)
+            .AsLocalHistoryFallback(2, DateTimeOffset.UtcNow);
+
+        Assert.True(WidgetSummary.ShouldRenderNeutralCodexQuotaForTesting(localHistoryFallback));
+        Assert.Equal(
+            new[]
+            {
+                (Label: "5小时额度", Value: "--", HasBar: false),
+                (Label: "每周额度", Value: "--", HasBar: false),
+            },
+            WidgetSummary.BuildCodexUnavailableRowsForTesting(localHistoryFallback));
+    }
+
+    [Fact]
+    public void LocalHistoryFallback_RemainsUnconfirmedWhenReadFromCache()
+    {
+        var localHistoryFallback = LiveCodexResult(12, 34)
+            .AsLocalHistoryFallback(2, DateTimeOffset.UtcNow);
+
+        Assert.Equal(
+            UsageObservationOrigin.LocalHistoryFallback,
+            localHistoryFallback.AsMemoryCache().ObservationOrigin);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData(ProviderErrorKind.Timeout)]
