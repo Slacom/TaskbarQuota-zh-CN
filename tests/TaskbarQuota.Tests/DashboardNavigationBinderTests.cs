@@ -1,0 +1,59 @@
+using TaskbarQuota.Taskbar;
+using TaskbarQuota.Usage;
+
+namespace TaskbarQuota.Tests;
+
+public sealed class DashboardNavigationBinderTests
+{
+    [Fact]
+    public void ComputeNavigationProviderIds_ExcludesDashboardDisabledProviderEvenWithDashboard()
+    {
+        var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
+            [ProviderId.Codex, ProviderId.Claude],
+            dashboardProviders: [ProviderId.Codex, ProviderId.Claude],
+            availableProviders: [],
+            isDashboardVisible: id => id == ProviderId.Codex,
+            hideUnavailable: false);
+
+        Assert.Equal([ProviderId.Codex], actual);
+    }
+
+    [Fact]
+    public void ComputeNavigationProviderIds_AutoHideRemovesProvidersWithoutDashboardCard()
+    {
+        var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
+            [ProviderId.Codex, ProviderId.Grok, ProviderId.Cursor],
+            dashboardProviders: [ProviderId.Codex],
+            availableProviders: [ProviderId.Grok, ProviderId.Cursor],
+            isDashboardVisible: _ => true,
+            hideUnavailable: true);
+
+        Assert.Equal([ProviderId.Codex], actual);
+    }
+
+    [Fact]
+    public void ComputeNavigationProviderIds_WhenAutoHideOffKeepsSetupEntryButNoGhostEntry()
+    {
+        var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
+            [ProviderId.Codex, ProviderId.Grok, ProviderId.Cursor],
+            dashboardProviders: [ProviderId.Codex],
+            availableProviders: [ProviderId.Grok],
+            isDashboardVisible: _ => true,
+            hideUnavailable: false);
+
+        Assert.Equal([ProviderId.Codex, ProviderId.Grok], actual);
+    }
+
+    [Fact]
+    public void ComputeNavigationProviderIds_ExcludesProviderWithNoBackingCardEvenWhenVisible()
+    {
+        var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
+            [ProviderId.Codex, ProviderId.Claude],
+            dashboardProviders: [ProviderId.Codex],
+            availableProviders: [],
+            isDashboardVisible: _ => true,
+            hideUnavailable: false);
+
+        Assert.Equal([ProviderId.Codex], actual);
+    }
+}
