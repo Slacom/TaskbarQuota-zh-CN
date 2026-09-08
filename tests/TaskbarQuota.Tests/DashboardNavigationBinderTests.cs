@@ -5,13 +5,16 @@ namespace TaskbarQuota.Tests;
 
 public sealed class DashboardNavigationBinderTests
 {
+    private static IReadOnlySet<ProviderId> Set(params ProviderId[] ids)
+        => ids.ToHashSet();
+
     [Fact]
     public void ComputeNavigationProviderIds_ExcludesDashboardDisabledProviderEvenWithDashboard()
     {
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
             [ProviderId.Codex, ProviderId.Claude],
-            dashboardProviders: [ProviderId.Codex, ProviderId.Claude],
-            availableProviders: [],
+            dashboardProviders: Set(ProviderId.Codex, ProviderId.Claude),
+            availableProviders: Set(),
             isDashboardVisible: id => id == ProviderId.Codex,
             hideUnavailable: false);
 
@@ -23,8 +26,8 @@ public sealed class DashboardNavigationBinderTests
     {
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
             [ProviderId.Codex, ProviderId.Grok, ProviderId.Cursor],
-            dashboardProviders: [ProviderId.Codex],
-            availableProviders: [ProviderId.Grok, ProviderId.Cursor],
+            dashboardProviders: Set(ProviderId.Codex),
+            availableProviders: Set(ProviderId.Grok, ProviderId.Cursor),
             isDashboardVisible: _ => true,
             hideUnavailable: true);
 
@@ -36,8 +39,8 @@ public sealed class DashboardNavigationBinderTests
     {
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
             [ProviderId.Codex, ProviderId.Grok, ProviderId.Cursor],
-            dashboardProviders: [ProviderId.Codex],
-            availableProviders: [ProviderId.Grok],
+            dashboardProviders: Set(ProviderId.Codex),
+            availableProviders: Set(ProviderId.Grok),
             isDashboardVisible: _ => true,
             hideUnavailable: false);
 
@@ -49,8 +52,8 @@ public sealed class DashboardNavigationBinderTests
     {
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
             [ProviderId.Codex, ProviderId.Claude],
-            dashboardProviders: [ProviderId.Codex],
-            availableProviders: [],
+            dashboardProviders: Set(ProviderId.Codex),
+            availableProviders: Set(),
             isDashboardVisible: _ => true,
             hideUnavailable: false);
 

@@ -310,16 +310,7 @@ namespace TaskbarQuota.Taskbar
                 Items = { open, activity, new PopupMenuSeparator(), move, reset, new PopupMenuSeparator(), quit },
             };
 
-            System.Drawing.Icon? icon = null;
-            try
-            {
-                var icoPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "TaskBarQuota.ico");
-                if (System.IO.File.Exists(icoPath))
-                    icon = new System.Drawing.Icon(icoPath, 48, 48);
-                else
-                    icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
-            }
-            catch { }
+            var icon = LoadTrayIcon();
 
             // TrayIconWithContextMenu owns a second menu thread. In an unpackaged WinUI process that path
             // can surface a stowed WinRT exception from H.NotifyIcon and terminate the process (the tray
@@ -329,12 +320,11 @@ namespace TaskbarQuota.Taskbar
             {
                 ToolTip = "TaskbarQuota",
             };
-            _trayIcon.Create();
-            if (icon != null)
-            {
-                _trayIconSource = icon;
-                _trayIcon.Icon = icon.Handle;
-            }
+            _trayIconSource = icon;
+            ConfigureTrayIconBeforeCreate(
+                icon?.Handle ?? IntPtr.Zero,
+                handle => _trayIcon.Icon = handle,
+                _trayIcon.Create);
             _trayIcon.MessageWindow.MouseEventReceived += (_, e) =>
             {
                 try
@@ -351,8 +341,53 @@ namespace TaskbarQuota.Taskbar
             };
         }
 
+        private static System.Drawing.Icon? LoadTrayIcon()
+        {
+            var icoPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "TaskBarQuota.ico");
+            try
+            {
+                if (System.IO.File.Exists(icoPath))
+                    return new System.Drawing.Icon(icoPath, 48, 48);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Tray ICO could not be loaded; trying the executable icon");
+            }
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
+                    return System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Executable icon could not be loaded for the tray");
+            }
+
+            return null;
+        }
+
         internal static bool IsTrayContextMenuEvent(MouseEvent mouseEvent)
             => mouseEvent == MouseEvent.IconRightMouseUp;
+
+        /// <summary>
+        /// H.NotifyIcon reads the icon handle during <see cref="TrayIcon.Create"/>. Its Icon setter only
+        /// stores the handle, so assigning it after Create leaves the native notification icon blank.
+        /// Keeping this order in one small helper makes the lifecycle regression-testable.
+        /// </summary>
+        internal static void ConfigureTrayIconBeforeCreate(
+            IntPtr iconHandle,
+            Action<IntPtr> assignIcon,
+            Action create)
+        {
+            ArgumentNullException.ThrowIfNull(assignIcon);
+            ArgumentNullException.ThrowIfNull(create);
+
+            if (iconHandle != IntPtr.Zero)
+                assignIcon(iconHandle);
+
+            create();
+        }
 
         private static void ShowTrayContextMenu(System.Drawing.Point point)
         {
@@ -1158,6 +1193,8 @@ namespace TaskbarQuota.Taskbar
                 try { _trayIcon.Dispose(); } catch (Exception ex) { Log.Warning(ex, "Failed to dispose tray icon"); }
                 _trayIcon = null;
             }
+            _trayIconSource?.Dispose();
+            _trayIconSource = null;
             _trayMenu = null;
             try { _flyout?.Close(); } catch { }
             _flyout = null;

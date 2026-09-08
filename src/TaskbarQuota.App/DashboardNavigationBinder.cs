@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Specialized;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -90,6 +91,34 @@ namespace TaskbarQuota
             IsSyncing = false;
         }
 
+        /// <summary>
+        /// Returns only providers that have a backing dashboard card and whose dashboard setting is on.
+        /// Setup cards remain navigable when the unavailable-provider filter is off, but an unknown
+        /// provider must never get a navigation entry that can turn itself on as a side effect of a click.
+        /// </summary>
+        internal static IReadOnlyList<ProviderId> ComputeNavigationProviderIds(
+            IReadOnlyList<ProviderId> allProviders,
+            IReadOnlySet<ProviderId> dashboardProviders,
+            IReadOnlySet<ProviderId> availableProviders,
+            Func<ProviderId, bool> isDashboardVisible,
+            bool hideUnavailable)
+        {
+            var result = new List<ProviderId>(allProviders.Count);
+            foreach (var id in allProviders)
+            {
+                if (!isDashboardVisible(id))
+                    continue;
+
+                if (dashboardProviders.Contains(id)
+                    || (!hideUnavailable && availableProviders.Contains(id)))
+                {
+                    result.Add(id);
+                }
+            }
+
+            return result;
+        }
+
         public bool SelectFromNavigation(NavigationViewSelectionChangedEventArgs args)
         {
             if (IsSyncing)
@@ -98,22 +127,40 @@ namespace TaskbarQuota
             if (args.SelectedItemContainer is not NavigationViewItem { Tag: ProviderId id })
                 return false;
 
+            if (!WidgetSettingsService.IsProviderDashboardVisible(id))
+            {
+                _requestedProviderId = null;
+                return true;
+            }
+
+            bool hasDashboardCard = _viewModel.Cards.Any(card => card.ProviderId == id);
+            bool hasAvailableCard = _viewModel.AvailableCards.Any(card => card.ProviderId == id);
+            if (!hasDashboardCard
+                && (WidgetSettingsService.AutoHideUnavailable || !hasAvailableCard))
+            {
+                _requestedProviderId = null;
+                return true;
+            }
+
             _requestedProviderId = id;
-            bool providerIsKnown = _viewModel.Cards.Any(card => card.ProviderId == id)
-                || _viewModel.AvailableCards.Any(card => card.ProviderId == id);
             _viewModel.SelectProvider(id);
-            if (!providerIsKnown)
-                _viewModel.EnableAvailableProvider(id);
             return true;
         }
 
-        // Pins can change from the dashboard card, from Settings, or from the budget auto-unpinning one.
+        // Visibility and pins can change from the dashboard card, Settings, discovery, or budget logic.
         private void OnWidgetSettingsChanged(object? sender, EventArgs e)
         {
             if (_disposed)
                 return;
 
-            _nav.DispatcherQueue.TryEnqueue(RefreshPinBadges);
+            _nav.DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_disposed)
+                    return;
+
+                ScheduleRebuild();
+                RefreshPinBadges();
+            });
         }
 
         private void Cards_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -139,19 +186,37 @@ namespace TaskbarQuota
         {
             IsSyncing = true;
             _providerGroup.MenuItems.Clear();
-            foreach (var provider in UsageCoordinator.Instance.Service.All)
+            var allProviders = UsageCoordinator.Instance.Service.All;
+            var dashboardProviders = _viewModel.Cards
+                .Select(card => card.ProviderId)
+                .ToHashSet();
+            var availableProviders = _viewModel.AvailableCards
+                .Select(card => card.ProviderId)
+                .ToHashSet();
+            var navigationProviders = ComputeNavigationProviderIds(
+                allProviders.Select(provider => provider.Id).ToArray(),
+                dashboardProviders,
+                availableProviders,
+                WidgetSettingsService.IsProviderDashboardVisible,
+                WidgetSettingsService.AutoHideUnavailable);
+
+            foreach (var providerId in navigationProviders)
             {
                 var card = _viewModel.Cards.Concat(_viewModel.AvailableCards)
-                    .FirstOrDefault(candidate => candidate.ProviderId == provider.Id);
+                    .FirstOrDefault(candidate => candidate.ProviderId == providerId);
+                var provider = allProviders.FirstOrDefault(candidate => candidate.Id == providerId);
+                if (provider is null)
+                    continue;
+
                 var displayName = card?.DisplayName ?? provider.DisplayName;
                 var item = new NavigationViewItem
                 {
                     Content = displayName,
-                    Tag = provider.Id,
-                    Icon = CreateProviderIcon(provider.Id),
+                    Tag = providerId,
+                    Icon = CreateProviderIcon(providerId),
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
-                ApplyPinBadge(item, provider.Id, displayName);
+                ApplyPinBadge(item, providerId, displayName);
                 _providerGroup.MenuItems.Add(item);
             }
 
@@ -172,6 +237,15 @@ namespace TaskbarQuota
         private void SyncSelection()
         {
             var selected = _requestedProviderId ?? _viewModel.SelectedCard?.ProviderId;
+            bool selectedIsVisible = selected is ProviderId selectedId
+                && _providerGroup.MenuItems.OfType<NavigationViewItem>()
+                    .Any(item => item.Tag is ProviderId id && id == selectedId);
+            if (selected is not null && !selectedIsVisible)
+            {
+                _requestedProviderId = null;
+                selected = _viewModel.SelectedCard?.ProviderId;
+            }
+
             foreach (var item in _providerGroup.MenuItems)
             {
                 if (item is not NavigationViewItem navItem)
@@ -186,6 +260,15 @@ namespace TaskbarQuota
                     _nav.SelectedItem = navItem;
 
                 SetActiveVisual(navItem, isSelected);
+            }
+
+            if (_providerPageActive)
+            {
+                _nav.SelectedItem = selected is ProviderId visibleId
+                    ? _providerGroup.MenuItems
+                        .OfType<NavigationViewItem>()
+                        .FirstOrDefault(item => item.Tag is ProviderId id && id == visibleId)
+                    : null;
             }
         }
 
