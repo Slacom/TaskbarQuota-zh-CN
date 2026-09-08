@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System;
+using TaskbarQuota.Taskbar;
 using TaskbarQuota.Services;
 using TaskbarQuota.Usage;
 
@@ -13,6 +15,31 @@ public class PinBudgetServiceTests
     // Measured tile widths: a two-row provider renders around 223px, a three-row one around 405px.
     private const int ShortTile = 223;
     private const int LongTile = 405;
+
+    [Fact]
+    public void RefreshBudgetCheck_DoesNotEraseUserPinPreferences()
+    {
+        int previousWidth = TaskbarSpace.AvailableLogicalWidth;
+        try
+        {
+            TaskbarSpace.AvailableLogicalWidth = 1;
+            WidgetSettingsService.ResetProviderPinsForTesting();
+            WidgetSettingsService.SetProviderPinnedForTesting(ProviderId.Zai, true);
+            WidgetSettingsService.SetProviderPinnedForTesting(ProviderId.Claude, true);
+            WidgetSettingsService.SetProviderPinnedForTesting(ProviderId.Codex, true);
+
+            PinBudgetService.EnforceBudget();
+
+            Assert.True(WidgetSettingsService.IsProviderPinned(ProviderId.Zai));
+            Assert.True(WidgetSettingsService.IsProviderPinned(ProviderId.Claude));
+            Assert.True(WidgetSettingsService.IsProviderPinned(ProviderId.Codex));
+        }
+        finally
+        {
+            WidgetSettingsService.ResetProviderPinsForTesting();
+            TaskbarSpace.AvailableLogicalWidth = previousWidth;
+        }
+    }
 
     [Theory]
     [InlineData(1, 225)]
