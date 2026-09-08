@@ -123,7 +123,7 @@
 
             <TextBlock Text="{loc:Zh Text=Providers}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
             <tk:SettingsCard Header="{loc:Zh Text='Hide unavailable providers'}"
-                             Description="自动隐藏尚未安装或登录的服务；仍可在仪表板或下方列表中重新启用。">
+                             Description="自动隐藏明确报告为尚未安装的服务；需要登录或等待应用启动的服务会保留，以便修复。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7B8;"/>
                 </tk:SettingsCard.HeaderIcon>
