@@ -27,7 +27,7 @@ TaskbarQuota 是一款原生 Windows 应用，适合同时使用多个 AI 编程
 
 - 可从 [Microsoft Store](https://apps.microsoft.com/detail/9n3kl49vfpvn?hl=zh-CN&gl=CN&mode=direct) 安装官方版本。
 - 也可以从 [GitHub Releases](https://github.com/Slacom/TaskbarQuota-zh-CN/releases/latest) 下载 x64 或 arm64 安装包。
-- `TaskbarQuota-1.3.2.3-x64-zh-CN-portable.zip` 是无需安装的便携版本。
+- `TaskbarQuota-1.3.2.4-x64-zh-CN-portable.zip` 是无需安装的便携版本。
 
 GitHub 安装包目前未签名，Windows SmartScreen 可能会要求确认。请先核对发布页中的文件名和 SHA-256，再根据需要选择“更多信息”→“仍要运行”。
 
@@ -156,7 +156,7 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 
 TaskbarQuota 使用 [MIT License](LICENSE) 发布。
 
-## 本次中文分支修改（1.3.2.3）
+## 本次中文分支修改（1.3.2.4）
 
 本分支基于上游 [TaskbarQuota](https://github.com/zioder/TaskbarQuota)，并发布到 [Slacom/TaskbarQuota-zh-CN](https://github.com/Slacom/TaskbarQuota-zh-CN)：
 
@@ -166,6 +166,8 @@ TaskbarQuota 使用 [MIT License](LICENSE) 发布。
 - 修复任务栏空间重新测量或刷新时自动取消用户固定的问题，固定偏好会保留；
 - 隔离托盘上下文菜单的线程和异常路径，降低非打包 WinUI 应用因 H.NotifyIcon 菜单导致崩溃的风险；
 - 接通服务发现取数结果，完善“隐藏不可用服务”的即时、可逆行为；
+- 让左侧供应商导航与仪表板开关及可用卡片保持一致，避免点击无效供应商时回退到 Codex 或意外重新启用；
+- 修复托盘图标在创建后才赋值导致的空白图标，并增加 EXE 图标回退；
 - 生成 x64 自包含便携包和安装包，便携包不包含用户凭据文件。
 
 如果你发现服务识别、额度解析或本地化问题，提交 Issue 时请隐藏 Token、Cookie、auth.json 和其他凭据内容。
