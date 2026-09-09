@@ -138,7 +138,7 @@ public class ProviderDiscoveryServiceTests
     }
 
     [Fact]
-    public void SyncInstalledProviderVisibility_EnablesDashboardAndWidget()
+    public void AutoHide_HidesInstalledAuthRequiredProvider()
     {
         ProviderInstallDetector.IsInstalledOverrideForTesting = id => id == ProviderId.Grok;
         WidgetSettingsService.SetProviderVisibleForTesting(ProviderId.Grok, false);
@@ -147,8 +147,8 @@ public class ProviderDiscoveryServiceTests
         ProviderDiscoveryService.RecordFetchResult(
             UsageResult.Failure(ProviderId.Grok, "auth", kind: ProviderErrorKind.AuthRequired));
 
-        Assert.True(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
-        Assert.True(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
+        Assert.False(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+        Assert.False(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
     }
 
     [Fact]

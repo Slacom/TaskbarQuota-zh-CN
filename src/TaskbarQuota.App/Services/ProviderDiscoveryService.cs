@@ -9,7 +9,7 @@ namespace TaskbarQuota;
 
 /// <summary>
 /// Tracks which providers are probed, configured, and visible in the dashboard vs taskbar widget.
-/// Auto-hides <see cref="ProviderErrorKind.NotInstalled"/> providers unless the user explicitly enables them.
+/// Auto-hides providers that are not installed or require authentication unless the user explicitly enables them.
 /// </summary>
 public static class ProviderDiscoveryService
 {
@@ -20,6 +20,7 @@ public static class ProviderDiscoveryService
     private static readonly HashSet<ProviderId> Probed = new();
     private static readonly HashSet<ProviderId> Configured = new();
     private static readonly HashSet<ProviderId> KnownNotInstalled = new();
+    private static readonly HashSet<ProviderId> KnownAuthRequired = new();
     private static readonly HashSet<ProviderId> AutoHiddenUnavailable = new();
     private static readonly HashSet<ProviderId> ExplicitlyEnabled = new();
     private static readonly HashSet<ProviderId> ExplicitlyDisabled = new();
@@ -67,14 +68,21 @@ public static class ProviderDiscoveryService
             if (installed && !ExplicitlyDisabled.Contains(result.Id))
                 EnsureProviderEnabled(result.Id);
 
-            if (installed || result.Ok || result.ErrorKind is ProviderErrorKind.AuthRequired or ProviderErrorKind.NotRunning)
+            if (installed || result.Ok || result.ErrorKind == ProviderErrorKind.NotRunning)
             {
                 KnownNotInstalled.Remove(result.Id);
+                KnownAuthRequired.Remove(result.Id);
                 AutoHiddenUnavailable.Remove(result.Id);
             }
             else if (result.ErrorKind == ProviderErrorKind.NotInstalled)
             {
                 KnownNotInstalled.Add(result.Id);
+                KnownAuthRequired.Remove(result.Id);
+            }
+            else if (result.ErrorKind == ProviderErrorKind.AuthRequired)
+            {
+                KnownAuthRequired.Add(result.Id);
+                KnownNotInstalled.Remove(result.Id);
             }
 
             bool newlyConfigured = result.Ok && !Configured.Contains(result.Id);
@@ -106,8 +114,7 @@ public static class ProviderDiscoveryService
                     WidgetSettingsService.SetProviderVisible(result.Id, true);
             }
 
-            if (result.ErrorKind == ProviderErrorKind.NotInstalled
-                && !installed
+            if (result.ErrorKind is ProviderErrorKind.NotInstalled or ProviderErrorKind.AuthRequired
                 && WidgetSettingsService.AutoHideUnavailable
                 && !ExplicitlyEnabled.Contains(result.Id)
                 && !ExplicitlyDisabled.Contains(result.Id))
@@ -130,6 +137,7 @@ public static class ProviderDiscoveryService
         lock (SyncRoot)
         {
             var candidates = KnownNotInstalled
+                .Concat(KnownAuthRequired)
                 .Concat(AutoHiddenUnavailable)
                 .Distinct()
                 .ToArray();
@@ -137,14 +145,20 @@ public static class ProviderDiscoveryService
             foreach (var id in candidates)
             {
                 bool installed = ProviderInstallDetector.IsInstalled(id);
-                if (installed || ExplicitlyEnabled.Contains(id) || ExplicitlyDisabled.Contains(id))
+                if (ExplicitlyEnabled.Contains(id) || ExplicitlyDisabled.Contains(id))
                 {
                     KnownNotInstalled.Remove(id);
+                    KnownAuthRequired.Remove(id);
                     AutoHiddenUnavailable.Remove(id);
                     continue;
                 }
 
-                if (WidgetSettingsService.AutoHideUnavailable)
+                if (installed && !KnownAuthRequired.Contains(id))
+                    KnownNotInstalled.Remove(id);
+
+                bool knownUnavailable = KnownNotInstalled.Contains(id) || KnownAuthRequired.Contains(id);
+
+                if (WidgetSettingsService.AutoHideUnavailable && knownUnavailable)
                 {
                     AutoHiddenUnavailable.Add(id);
                     SetAutomaticVisibility(id, dashboardVisible: false, widgetVisible: false);
@@ -186,17 +200,31 @@ public static class ProviderDiscoveryService
             return ExplicitlyDisabled.Contains(id);
     }
 
+    private static bool HasExplicitDashboardEnable(ProviderId id)
+        => WidgetSettingsService.TryGetDashboardProviderVisibilityOverride(id, out bool visible) && visible;
+
     public static void EnableProvider(ProviderId id)
     {
+        bool disableAutoHide;
         lock (SyncRoot)
         {
+            disableAutoHide = WidgetSettingsService.AutoHideUnavailable
+                && (KnownNotInstalled.Contains(id)
+                    || KnownAuthRequired.Contains(id)
+                    || AutoHiddenUnavailable.Contains(id));
             ExplicitlyEnabled.Add(id);
             ExplicitlyDisabled.Remove(id);
             KnownNotInstalled.Remove(id);
+            KnownAuthRequired.Remove(id);
             AutoHiddenUnavailable.Remove(id);
             EnsureProviderEnabled(id);
             Save();
         }
+
+        // A manual dashboard enable is an explicit request to see this unavailable provider. The
+        // global filter must yield, otherwise the next discovery pass would immediately hide it again.
+        if (disableAutoHide)
+            WidgetSettingsService.ApplyAutoHideUnavailable(false);
     }
 
     /// <summary>
@@ -225,6 +253,7 @@ public static class ProviderDiscoveryService
             ExplicitlyEnabled.Remove(id);
             ExplicitlyDisabled.Add(id);
             KnownNotInstalled.Remove(id);
+            KnownAuthRequired.Remove(id);
             AutoHiddenUnavailable.Remove(id);
             WidgetSettingsService.SetProviderDashboardVisible(id, false);
             WidgetSettingsService.SetProviderVisible(id, false);
@@ -236,7 +265,7 @@ public static class ProviderDiscoveryService
     {
         if (id == active)
             return true;
-        if (IsExplicitlyDisabled(id))
+        if (IsExplicitlyDisabled(id) && !HasExplicitDashboardEnable(id))
             return false;
         if (ProviderInstallDetector.IsInstalled(id))
             return true;
@@ -255,7 +284,7 @@ public static class ProviderDiscoveryService
 
     public static bool ShouldShowInDashboard(UsageResult result, ProviderId? active)
     {
-        if (IsExplicitlyDisabled(result.Id))
+        if (IsExplicitlyDisabled(result.Id) && !HasExplicitDashboardEnable(result.Id))
             return false;
         if (ProviderInstallDetector.IsInstalled(result.Id))
             return true;
@@ -292,6 +321,7 @@ public static class ProviderDiscoveryService
             Probed.Clear();
             Configured.Clear();
             KnownNotInstalled.Clear();
+            KnownAuthRequired.Clear();
             AutoHiddenUnavailable.Clear();
             ExplicitlyEnabled.Clear();
             ExplicitlyDisabled.Clear();
@@ -389,6 +419,10 @@ public static class ProviderDiscoveryService
                         if (Enum.TryParse<ProviderId>(id, out var parsed))
                             KnownNotInstalled.Add(parsed);
 
+                    foreach (var id in state.KnownAuthRequired ?? [])
+                        if (Enum.TryParse<ProviderId>(id, out var parsed))
+                            KnownAuthRequired.Add(parsed);
+
                     foreach (var id in state.AutoHiddenUnavailable ?? [])
                         if (Enum.TryParse<ProviderId>(id, out var parsed))
                             AutoHiddenUnavailable.Add(parsed);
@@ -445,6 +479,7 @@ public static class ProviderDiscoveryService
                 Probed = Probed.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
                 Configured = Configured.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
                 KnownNotInstalled = KnownNotInstalled.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
+                KnownAuthRequired = KnownAuthRequired.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
                 AutoHiddenUnavailable = AutoHiddenUnavailable.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
                 ExplicitlyEnabled = ExplicitlyEnabled.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
                 ExplicitlyDisabled = ExplicitlyDisabled.Select(id => id.ToString()).OrderBy(s => s).ToArray(),
@@ -463,6 +498,7 @@ public static class ProviderDiscoveryService
         public string[]? Probed { get; set; }
         public string[]? Configured { get; set; }
         public string[]? KnownNotInstalled { get; set; }
+        public string[]? KnownAuthRequired { get; set; }
         public string[]? AutoHiddenUnavailable { get; set; }
         public string[]? ExplicitlyEnabled { get; set; }
         public string[]? ExplicitlyDisabled { get; set; }

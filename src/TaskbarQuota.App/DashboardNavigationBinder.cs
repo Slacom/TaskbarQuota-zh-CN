@@ -92,9 +92,10 @@ namespace TaskbarQuota
         }
 
         /// <summary>
-        /// Returns only providers that have a backing dashboard card and whose dashboard setting is on.
-        /// Setup cards remain navigable when the unavailable-provider filter is off, but an unknown
-        /// provider must never get a navigation entry that can turn itself on as a side effect of a click.
+        /// Returns providers whose dashboard setting is on. When unavailable providers are hidden, only
+        /// providers with a loaded dashboard card remain; otherwise the complete registered provider list
+        /// is used so a fresh user does not have to wait for discovery or quota fetching before seeing the
+        /// provider navigation entries.
         /// </summary>
         internal static IReadOnlyList<ProviderId> ComputeNavigationProviderIds(
             IReadOnlyList<ProviderId> allProviders,
@@ -109,8 +110,7 @@ namespace TaskbarQuota
                 if (!isDashboardVisible(id))
                     continue;
 
-                if (dashboardProviders.Contains(id)
-                    || (!hideUnavailable && availableProviders.Contains(id)))
+                if (!hideUnavailable || dashboardProviders.Contains(id))
                 {
                     result.Add(id);
                 }
@@ -134,9 +134,7 @@ namespace TaskbarQuota
             }
 
             bool hasDashboardCard = _viewModel.Cards.Any(card => card.ProviderId == id);
-            bool hasAvailableCard = _viewModel.AvailableCards.Any(card => card.ProviderId == id);
-            if (!hasDashboardCard
-                && (WidgetSettingsService.AutoHideUnavailable || !hasAvailableCard))
+            if (WidgetSettingsService.AutoHideUnavailable && !hasDashboardCard)
             {
                 _requestedProviderId = null;
                 return true;
