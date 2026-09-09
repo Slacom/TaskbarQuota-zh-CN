@@ -168,6 +168,7 @@ public class ProviderDiscoveryServiceTests
     public void ShouldFetch_SkipsExplicitlyDisabledInstalledProvider()
     {
         ProviderDiscoveryService.MarkExplicitlyDisabledForTesting(ProviderId.Grok);
+        WidgetSettingsService.SetProviderDashboardVisibleForTesting(ProviderId.Grok, false);
 
         Assert.False(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: null));
     }
@@ -231,6 +232,19 @@ public class ProviderDiscoveryServiceTests
         var provider = new UsageService().Get(ProviderId.Grok)!;
         var pending = UsageResult.Pending(ProviderId.Grok, provider, "loading");
 
+        Assert.True(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: null));
+        Assert.True(ProviderDiscoveryService.ShouldShowInDashboard(pending, active: null));
+    }
+
+    [Fact]
+    public void MissingDashboardPreferenceUsesDefaultForStaleDiscoveryDisabledProvider()
+    {
+        ProviderDiscoveryService.MarkExplicitlyDisabledForTesting(ProviderId.Grok);
+
+        var provider = new UsageService().Get(ProviderId.Grok)!;
+        var pending = UsageResult.Pending(ProviderId.Grok, provider, "loading");
+
+        Assert.True(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
         Assert.True(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: null));
         Assert.True(ProviderDiscoveryService.ShouldShowInDashboard(pending, active: null));
     }
