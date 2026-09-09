@@ -476,6 +476,7 @@ namespace TaskbarQuota.ViewModels
                 .Append(isActive).Append('|')
                 .Append(r.Error).Append('|')
                 .Append(r.ErrorKind).Append('|')
+                .Append(r.ObservationOrigin).Append('|')
                 .Append(r.Source.Kind).Append('|')
                 .Append(r.Source.DisplayName);
 
@@ -534,6 +535,9 @@ namespace TaskbarQuota.ViewModels
 
             return sb.ToString();
         }
+
+        internal static string BuildCardSignatureForTesting(UsageResult result, bool isActive)
+            => BuildCardSignature(result, isActive);
 
         private static void AppendUsagePeriod(StringBuilder sb, UsagePeriod? period)
         {
