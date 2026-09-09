@@ -27,7 +27,7 @@ TaskbarQuota 是一款原生 Windows 应用，适合同时使用多个 AI 编程
 
 - 可从 [Microsoft Store](https://apps.microsoft.com/detail/9n3kl49vfpvn?hl=zh-CN&gl=CN&mode=direct) 安装官方版本。
 - 也可以从 [GitHub Releases](https://github.com/Slacom/TaskbarQuota-zh-CN/releases/latest) 下载 x64 或 arm64 安装包。
-- `TaskbarQuota-1.3.2.4-x64-zh-CN-portable.zip` 是无需安装的便携版本。
+- `TaskbarQuota-1.3.2.2-x64-zh-CN-portable.zip` 是无需安装的便携版本。
 
 GitHub 安装包目前未签名，Windows SmartScreen 可能会要求确认。请先核对发布页中的文件名和 SHA-256，再根据需要选择“更多信息”→“仍要运行”。
 
@@ -85,7 +85,7 @@ GitHub 安装包目前未签名，Windows SmartScreen 可能会要求确认。�
 
 仪表板会显示已启用服务的计划、额度窗口、重置时间、余额和历史信息。应用可以随 Windows 启动，并在额度达到阈值或 Codex 重置额度即将过期时发送 Windows 通知。
 
-“隐藏不可用服务”只自动处理最近一次取数明确报告为“尚未安装”的服务。需要登录或等待桌面应用启动的服务会保留，方便用户修复凭据；开关关闭后，由该策略自动隐藏的服务会恢复显示。用户手动隐藏、禁用或固定的设置优先级更高，自动隐藏不会清除固定偏好。
+“隐藏不可用服务”默认关闭，只自动处理最近一次取数明确报告为“尚未安装”的服务。需要登录或等待桌面应用启动的服务会保留，方便用户修复凭据；开关关闭后，由该策略自动隐藏的服务会恢复显示。用户手动隐藏、禁用或固定的设置优先级更高，自动隐藏不会清除固定偏好。
 
 当任务栏可用空间暂时不足时，小组件会在内存中暂时隐藏放不下的非活动服务，空间恢复后再显示；不会把用户的固定设置改成“取消固定”。
 
@@ -156,7 +156,7 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 
 TaskbarQuota 使用 [MIT License](LICENSE) 发布。
 
-## 本次中文分支修改（1.3.2.4）
+## 本次中文分支修改（1.3.2.2）
 
 本分支基于上游 [TaskbarQuota](https://github.com/zioder/TaskbarQuota)，并发布到 [Slacom/TaskbarQuota-zh-CN](https://github.com/Slacom/TaskbarQuota-zh-CN)：
 
@@ -166,6 +166,7 @@ TaskbarQuota 使用 [MIT License](LICENSE) 发布。
 - 修复任务栏空间重新测量或刷新时自动取消用户固定的问题，固定偏好会保留；
 - 隔离托盘上下文菜单的线程和异常路径，降低非打包 WinUI 应用因 H.NotifyIcon 菜单导致崩溃的风险；
 - 接通服务发现取数结果，完善“隐藏不可用服务”的即时、可逆行为；
+- 新用户默认显示全部供应商；开启“隐藏不可用服务”后才自动隐藏明确未安装的服务；
 - 让左侧供应商导航与仪表板开关及可用卡片保持一致，避免点击无效供应商时回退到 Codex 或意外重新启用；
 - 修复托盘图标在创建后才赋值导致的空白图标，并增加 EXE 图标回退；
 - 生成 x64 自包含便携包和安装包，便携包不包含用户凭据文件。

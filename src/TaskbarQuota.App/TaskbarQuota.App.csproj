@@ -31,9 +31,9 @@
     <Product>TaskbarQuota</Product>
     <AssemblyName>TaskbarQuota</AssemblyName>
     <ApplicationIcon>Assets\TaskBarQuota.ico</ApplicationIcon>
-    <Version>1.3.2.4</Version>
-    <AssemblyVersion>1.3.2.4</AssemblyVersion>
-    <FileVersion>1.3.2.4</FileVersion>
+    <Version>1.3.2.2</Version>
+    <AssemblyVersion>1.3.2.2</AssemblyVersion>
+    <FileVersion>1.3.2.2</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
