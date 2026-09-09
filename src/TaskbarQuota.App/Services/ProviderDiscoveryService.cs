@@ -200,9 +200,6 @@ public static class ProviderDiscoveryService
             return ExplicitlyDisabled.Contains(id);
     }
 
-    private static bool HasExplicitDashboardEnable(ProviderId id)
-        => WidgetSettingsService.TryGetDashboardProviderVisibilityOverride(id, out bool visible) && visible;
-
     public static void EnableProvider(ProviderId id)
     {
         bool disableAutoHide;
@@ -265,7 +262,7 @@ public static class ProviderDiscoveryService
     {
         if (id == active)
             return true;
-        if (IsExplicitlyDisabled(id) && !HasExplicitDashboardEnable(id))
+        if (IsExplicitlyDisabled(id) && !WidgetSettingsService.IsProviderDashboardVisible(id))
             return false;
         if (ProviderInstallDetector.IsInstalled(id))
             return true;
@@ -284,7 +281,7 @@ public static class ProviderDiscoveryService
 
     public static bool ShouldShowInDashboard(UsageResult result, ProviderId? active)
     {
-        if (IsExplicitlyDisabled(result.Id) && !HasExplicitDashboardEnable(result.Id))
+        if (IsExplicitlyDisabled(result.Id) && !WidgetSettingsService.IsProviderDashboardVisible(result.Id))
             return false;
         if (ProviderInstallDetector.IsInstalled(result.Id))
             return true;

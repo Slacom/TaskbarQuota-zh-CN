@@ -83,12 +83,38 @@ namespace TaskbarQuota.Views
             {
                 Log.Information(
                     $"Settings page loaded (surface={WidgetSettingsService.CurrentSurface}, layout={WidgetSettingsService.Current})");
+                WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
+                WidgetSettingsService.Changed += OnWidgetSettingsChanged;
                 ViewModel.ReloadProviders();
                 BuildTaskbarPlacementOptions();
                 BuildPinOptions();
                 RebuildProviderSettings();
             };
+            Unloaded += (_, _) => WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
             _isInitializing = false;
+        }
+
+        private void OnWidgetSettingsChanged(object? sender, System.EventArgs e)
+        {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => OnWidgetSettingsChanged(sender, e));
+                return;
+            }
+
+            bool wasInitializing = _isInitializing;
+            _isInitializing = true;
+            try
+            {
+                AutoHideUnavailableToggle.IsOn = WidgetSettingsService.AutoHideUnavailable;
+                ViewModel.RefreshProviderVisibility();
+                foreach (var item in ViewModel.Providers)
+                    RefreshProviderRow(item);
+            }
+            finally
+            {
+                _isInitializing = wasInitializing;
+            }
         }
 
         private void RebuildProviderSettings()

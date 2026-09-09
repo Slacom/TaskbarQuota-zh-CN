@@ -127,6 +127,16 @@ namespace TaskbarQuota.ViewModels
             }
         }
 
+        public void RefreshProviderVisibility()
+        {
+            foreach (var item in Providers)
+            {
+                item.IsDashboardVisible = WidgetSettingsService.IsProviderDashboardVisible(item.Id);
+                item.IsWidgetVisible = WidgetSettingsService.IsProviderVisible(item.Id);
+                item.IsPinned = WidgetSettingsService.IsProviderPinned(item.Id);
+            }
+        }
+
         public void ApplyDashboardVisibility(ProviderSettingItemViewModel item, bool visible)
         {
             if (visible)
