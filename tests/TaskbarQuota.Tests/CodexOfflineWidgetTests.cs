@@ -129,6 +129,17 @@ public class CodexOfflineWidgetTests
             WidgetSummary.BuildRenderSignatureForTesting(fallback));
     }
 
+    [Fact]
+    public void FallbackAndLiveSnapshotHaveDifferentDashboardCardSignatures()
+    {
+        var live = LiveCodexResult(12, 34).AsLiveObservation(1, DateTimeOffset.UtcNow);
+        var fallback = live.AsFailureFallback(2, DateTimeOffset.UtcNow);
+
+        Assert.NotEqual(
+            DashboardViewModel.BuildCardSignatureForTesting(live, isActive: false),
+            DashboardViewModel.BuildCardSignatureForTesting(fallback, isActive: false));
+    }
+
     private static UsageResult LiveCodexResult(double primary, double secondary)
     {
         var provider = new TestProvider();
