@@ -131,7 +131,7 @@ var
   ButtonWidth: Integer;
   ButtonTop: Integer;
 begin
-  Form := CreateCustomForm(ScaleX(420), ScaleY(150), False, True);
+  Form := CreateCustomForm(ScaleX(300), ScaleY(150), False, True);
   try
     Form.Caption := ExpandConstant('{#MyAppName}') + ' 卸载';
 
