@@ -9,13 +9,13 @@ public sealed class DashboardNavigationBinderTests
         => ids.ToHashSet();
 
     [Fact]
-    public void FreshUserWithAutoHideOff_KeepsEverySupportedProviderNavigationEntry()
+    public void FreshUserWithAutoHideOff_DoesNotWaitForDashboardCards()
     {
         var all = Enum.GetValues<ProviderId>();
 
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
             all,
-            dashboardProviders: all.ToHashSet(),
+            dashboardProviders: Set(),
             availableProviders: Set(),
             isDashboardVisible: _ => true,
             hideUnavailable: false);
@@ -50,28 +50,15 @@ public sealed class DashboardNavigationBinderTests
     }
 
     [Fact]
-    public void ComputeNavigationProviderIds_WhenAutoHideOffKeepsSetupEntryButNoGhostEntry()
+    public void ComputeNavigationProviderIds_WhenAutoHideOffUsesOnlyDashboardSetting()
     {
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
             [ProviderId.Codex, ProviderId.Grok, ProviderId.Cursor],
-            dashboardProviders: Set(ProviderId.Codex),
-            availableProviders: Set(ProviderId.Grok),
-            isDashboardVisible: _ => true,
-            hideUnavailable: false);
-
-        Assert.Equal([ProviderId.Codex, ProviderId.Grok], actual);
-    }
-
-    [Fact]
-    public void ComputeNavigationProviderIds_ExcludesProviderWithNoBackingCardEvenWhenVisible()
-    {
-        var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
-            [ProviderId.Codex, ProviderId.Claude],
-            dashboardProviders: Set(ProviderId.Codex),
+            dashboardProviders: Set(),
             availableProviders: Set(),
-            isDashboardVisible: _ => true,
+            isDashboardVisible: id => id != ProviderId.Grok,
             hideUnavailable: false);
 
-        Assert.Equal([ProviderId.Codex], actual);
+        Assert.Equal([ProviderId.Codex, ProviderId.Cursor], actual);
     }
 }

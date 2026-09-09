@@ -197,6 +197,21 @@ public class ProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void ManuallyEnablingKnownUnavailableProvider_DisablesAutoHide()
+    {
+        ProviderDiscoveryService.RecordFetchResult(
+            UsageResult.Failure(ProviderId.Grok, "not installed", kind: ProviderErrorKind.NotInstalled));
+
+        Assert.False(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+        Assert.True(WidgetSettingsService.AutoHideUnavailable);
+
+        ProviderDiscoveryService.EnableProvider(ProviderId.Grok);
+
+        Assert.False(WidgetSettingsService.AutoHideUnavailable);
+        Assert.True(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+    }
+
+    [Fact]
     public void DisablingAutoHideRestoresAutomaticHideWithoutLosingPin()
     {
         bool previous = WidgetSettingsService.AutoHideUnavailable;
