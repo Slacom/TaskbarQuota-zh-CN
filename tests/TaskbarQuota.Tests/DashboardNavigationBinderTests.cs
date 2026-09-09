@@ -9,6 +9,21 @@ public sealed class DashboardNavigationBinderTests
         => ids.ToHashSet();
 
     [Fact]
+    public void FreshUserWithAutoHideOff_KeepsEverySupportedProviderNavigationEntry()
+    {
+        var all = Enum.GetValues<ProviderId>();
+
+        var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(
+            all,
+            dashboardProviders: all.ToHashSet(),
+            availableProviders: Set(),
+            isDashboardVisible: _ => true,
+            hideUnavailable: false);
+
+        Assert.Equal(all, actual);
+    }
+
+    [Fact]
     public void ComputeNavigationProviderIds_ExcludesDashboardDisabledProviderEvenWithDashboard()
     {
         var actual = DashboardNavigationBinder.ComputeNavigationProviderIds(

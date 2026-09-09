@@ -1000,13 +1000,20 @@ public static class WidgetSettingsService
     }
 
     private static bool LoadAutoHideUnavailable()
+        => LoadAutoHideUnavailableFromPath(AutoHideUnavailablePath);
+
+    internal static bool LoadAutoHideUnavailableForTesting(string path)
+        => LoadAutoHideUnavailableFromPath(path);
+
+    private static bool LoadAutoHideUnavailableFromPath(string path)
     {
         try
         {
-            if (!File.Exists(AutoHideUnavailablePath))
-                return true;
+            // Opt-in: a fresh user should see every supported provider and can enable this filter later.
+            if (!File.Exists(path))
+                return false;
 
-            string raw = File.ReadAllText(AutoHideUnavailablePath);
+            string raw = File.ReadAllText(path);
             return !int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) || value != 0;
         }
         catch
@@ -1015,8 +1022,7 @@ public static class WidgetSettingsService
         }
     }
 
-    // Opt-in, so an absent file means off — the opposite default from AutoHideUnavailable, whose file
-    // absence means "on". Existing installs must not silently start hiding the widget after an update.
+    // Opt-in, so an absent file means off. Existing installs with an explicit file keep their choice.
     private static bool LoadHideWhenUnfocused()
     {
         try
