@@ -28,6 +28,9 @@
 #ifndef OutputDir
   #define OutputDir "..\artifacts"
 #endif
+#ifndef MyUserDataRoot
+  #define MyUserDataRoot "{localappdata}"
+#endif
 
 #if TargetArch == "arm64"
   #define ArchAllowed "arm64"
@@ -175,8 +178,8 @@ var
   CurrentDataDir: String;
   LegacyDataDir: String;
 begin
-  CurrentDataDir := ExpandConstant('{localappdata}\TaskbarQuota');
-  LegacyDataDir := ExpandConstant('{localappdata}\WinCheck');
+  CurrentDataDir := ExpandConstant('{#MyUserDataRoot}\TaskbarQuota');
+  LegacyDataDir := ExpandConstant('{#MyUserDataRoot}\WinCheck');
   DelTree(CurrentDataDir, True, True, True);
   DelTree(LegacyDataDir, True, True, True);
 end;

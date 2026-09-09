@@ -96,7 +96,7 @@ public static class ProviderDiscoveryService
                     WidgetSettingsService.SetProviderDashboardVisible(result.Id, true);
 
             // First successful fetch after install/login — restore widget visibility
-            // (auto-hide turns it off for NotInstalled, but usage should return once set up).
+            // (auto-hide turns unavailable providers off, but usage should return once set up).
                 if (newlyConfigured
                     && !ExplicitlyWidgetDisabled.Contains(result.Id)
                     && !WidgetSettingsService.IsProviderVisible(result.Id))
@@ -129,7 +129,7 @@ public static class ProviderDiscoveryService
 
     /// <summary>
     /// Applies a changed auto-hide setting to providers whose last probe explicitly reported that they
-    /// are not installed. Only visibility changed by this policy is restored; explicit dashboard/widget
+    /// are unavailable. Only visibility changed by this policy is restored; explicit dashboard/widget
     /// choices remain authoritative.
     /// </summary>
     public static void ReconcileUnavailableVisibility()
