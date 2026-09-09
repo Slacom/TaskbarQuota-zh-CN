@@ -84,6 +84,23 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 var
   KeepUserData: Boolean;
 
+function IsUninstallSilent: Boolean;
+var
+  I: Integer;
+  Param: String;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    Param := UpperCase(ParamStr(I));
+    if (Param = '/SILENT') or (Param = '/VERYSILENT') then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 function AskUserDataRetention: Boolean;
 var
   Form: TSetupForm;
@@ -163,7 +180,7 @@ end;
 function InitializeUninstall: Boolean;
 begin
   KeepUserData := True;
-  if WizardSilent then
+  if IsUninstallSilent() then
   begin
     // Non-interactive uninstallers keep user data by default; there is no checkbox to make this choice.
     Result := True;
