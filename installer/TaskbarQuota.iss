@@ -10,6 +10,9 @@
 #ifndef MyAppId
   #define MyAppId "{{A7C4E2B1-9F3D-4A8E-B5C6-1D2E3F4A5B6C}"
 #endif
+#ifndef MyAppIdValue
+  #define MyAppIdValue "A7C4E2B1-9F3D-4A8E-B5C6-1D2E3F4A5B6C"
+#endif
 #ifndef MyDefaultDir
   #define MyDefaultDir "{autopf}\TaskbarQuota"
 #endif
@@ -74,7 +77,7 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Parameters: "/SILENT /TASKBARQUOTA_INTERACTIVE_UNINSTALL"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
@@ -101,6 +104,23 @@ begin
   end;
 end;
 
+function IsInteractiveUninstall: Boolean;
+var
+  I: Integer;
+  Param: String;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    Param := UpperCase(ParamStr(I));
+    if Param = '/TASKBARQUOTA_INTERACTIVE_UNINSTALL' then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 function AskUserDataRetention: Boolean;
 var
   Form: TSetupForm;
@@ -111,7 +131,7 @@ var
   ButtonWidth: Integer;
   ButtonTop: Integer;
 begin
-  Form := CreateCustomForm(ScaleX(520), ScaleY(150), False, True);
+  Form := CreateCustomForm(ScaleX(420), ScaleY(150), False, True);
   try
     Form.Caption := ExpandConstant('{#MyAppName}') + ' 卸载';
 
@@ -167,10 +187,29 @@ begin
   end;
 end;
 
+procedure ConfigureUninstallCommand;
+var
+  UninstallKey: String;
+  UninstallCommand: String;
+begin
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' +
+    '{#MyAppIdValue}' + '}_is1';
+  UninstallCommand := '"' + ExpandConstant('{app}\unins000.exe') +
+    '" /SILENT /TASKBARQUOTA_INTERACTIVE_UNINSTALL';
+  RegWriteStringValue(HKEY_CURRENT_USER, UninstallKey, 'UninstallString', UninstallCommand);
+end;
+
+procedure DeinitializeSetup;
+begin
+  // Inno writes its own uninstall registration after the normal setup steps. Write this last so
+  // the interactive retention prompt is also used by Apps & Features, not only the Start menu link.
+  ConfigureUninstallCommand();
+end;
+
 function InitializeUninstall: Boolean;
 begin
   KeepUserData := True;
-  if IsUninstallSilent() then
+  if IsUninstallSilent() and not IsInteractiveUninstall() then
   begin
     // Non-interactive uninstallers keep user data by default; there is no checkbox to make this choice.
     Result := True;
