@@ -212,6 +212,19 @@ public class ProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void DashboardPreferenceCanReenableStaleDiscoveryDisabledProvider()
+    {
+        ProviderDiscoveryService.MarkExplicitlyDisabledForTesting(ProviderId.Grok);
+        WidgetSettingsService.SetProviderDashboardVisibleForTesting(ProviderId.Grok, true);
+
+        var provider = new UsageService().Get(ProviderId.Grok)!;
+        var pending = UsageResult.Pending(ProviderId.Grok, provider, "loading");
+
+        Assert.True(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: null));
+        Assert.True(ProviderDiscoveryService.ShouldShowInDashboard(pending, active: null));
+    }
+
+    [Fact]
     public void DisablingAutoHideRestoresAutomaticHideWithoutLosingPin()
     {
         bool previous = WidgetSettingsService.AutoHideUnavailable;
