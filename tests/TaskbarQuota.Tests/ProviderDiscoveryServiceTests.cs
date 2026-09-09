@@ -30,6 +30,17 @@ public class ProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void RecordFetchResult_AutoHidesAuthRequiredProvider()
+    {
+        ProviderDiscoveryService.RecordFetchResult(
+            UsageResult.Failure(ProviderId.Grok, "login required", kind: ProviderErrorKind.AuthRequired));
+
+        Assert.False(WidgetSettingsService.IsProviderDashboardVisible(ProviderId.Grok));
+        Assert.False(WidgetSettingsService.IsProviderVisible(ProviderId.Grok));
+        Assert.True(ProviderDiscoveryService.IsProbed(ProviderId.Grok));
+    }
+
+    [Fact]
     public void RecordFetchResult_MarksConfiguredOnSuccess()
     {
         var provider = new UsageService().Get(ProviderId.Codex)!;
