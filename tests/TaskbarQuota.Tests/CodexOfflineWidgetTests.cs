@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TaskbarQuota.Controls;
 using TaskbarQuota.Usage;
+using TaskbarQuota.ViewModels;
 
 namespace TaskbarQuota.Tests;
 
@@ -50,6 +51,43 @@ public class CodexOfflineWidgetTests
         Assert.Equal(
             UsageObservationOrigin.LocalHistoryFallback,
             localHistoryFallback.AsMemoryCache().ObservationOrigin);
+    }
+
+    [Fact]
+    public void LocalHistoryFallbackDashboard_RendersBothNeutralQuotaBars()
+    {
+        var provider = new TestProvider();
+        var localHistoryFallback = UsageResult.Success(
+                ProviderId.Codex,
+                provider,
+                new ProviderFetchResult(new UsageSnapshot(new RateWindow(0)), "Local usage history"))
+            .AsLocalHistoryFallback(2, DateTimeOffset.UtcNow);
+
+        Assert.Equal(
+            new[]
+            {
+                (RowId: WidgetSettingsService.RowPrimary, Label: "5小时额度", Percent: 0d, Value: "--"),
+                (RowId: WidgetSettingsService.RowSecondary, Label: "每周额度", Percent: 0d, Value: "--"),
+            },
+            ProviderCardViewModel.BuildCodexUnavailableBarSpecs(localHistoryFallback));
+    }
+
+    [Fact]
+    public void ProWeeklyOnlyFallback_UsesOnlyWeeklyPlaceholderInBothSurfaces()
+    {
+        var fallback = LiveCodexWeeklyOnlyResult("Pro 20x")
+            .AsFailureFallback(2, DateTimeOffset.UtcNow);
+
+        Assert.Equal(
+            new[] { (Label: "每周额度", Value: "--", HasBar: false) },
+            WidgetSummary.BuildCodexUnavailableRowsForTesting(fallback));
+
+        Assert.Equal(
+            new[]
+            {
+                (RowId: WidgetSettingsService.RowPrimary, Label: "每周额度", Percent: 0d, Value: "--"),
+            },
+            ProviderCardViewModel.BuildCodexUnavailableBarSpecs(fallback));
     }
 
     [Theory]
@@ -101,6 +139,20 @@ public class CodexOfflineWidgetTests
                 new UsageSnapshot(new RateWindow(primary))
                 {
                     Secondary = new RateWindow(secondary),
+                },
+                "oauth"));
+    }
+
+    private static UsageResult LiveCodexWeeklyOnlyResult(string plan)
+    {
+        var provider = new TestProvider();
+        return UsageResult.Success(
+            ProviderId.Codex,
+            provider,
+            new ProviderFetchResult(
+                new UsageSnapshot(new RateWindow(12, windowMinutes: 10080, label: "Weekly"))
+                {
+                    LoginMethod = plan,
                 },
                 "oauth"));
     }
