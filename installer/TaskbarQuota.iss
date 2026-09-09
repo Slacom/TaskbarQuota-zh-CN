@@ -105,14 +105,13 @@ function AskUserDataRetention: Boolean;
 var
   Form: TSetupForm;
   Prompt: TNewStaticText;
-  Detail: TNewStaticText;
   KeepCheckBox: TNewCheckBox;
   ContinueButton: TNewButton;
   CancelButton: TNewButton;
   ButtonWidth: Integer;
   ButtonTop: Integer;
 begin
-  Form := CreateCustomForm(ScaleX(520), ScaleY(220), False, True);
+  Form := CreateCustomForm(ScaleX(520), ScaleY(150), False, True);
   try
     Form.Caption := ExpandConstant('{#MyAppName}') + ' 卸载';
 
@@ -126,26 +125,17 @@ begin
     Prompt.Parent := Form;
     Prompt.AdjustHeight;
 
-    Detail := TNewStaticText.Create(Form);
-    Detail.AutoSize := False;
-    Detail.Left := Prompt.Left;
-    Detail.Top := Prompt.Top + Prompt.Height + ScaleY(8);
-    Detail.Width := Prompt.Width;
-    Detail.WordWrap := True;
-    Detail.Caption := '勾选“保留配置”可在以后重新安装时继续使用当前设置。取消勾选将同时删除当前配置和旧版 WinCheck 配置。';
-    Detail.Parent := Form;
-    Detail.AdjustHeight;
-
     KeepCheckBox := TNewCheckBox.Create(Form);
     KeepCheckBox.Left := Prompt.Left;
-    KeepCheckBox.Top := Detail.Top + Detail.Height + ScaleY(12);
+    KeepCheckBox.Top := Prompt.Top + Prompt.Height + ScaleY(8);
     KeepCheckBox.Width := Prompt.Width;
     KeepCheckBox.Height := ScaleY(20);
-    KeepCheckBox.Caption := '保留配置（%LOCALAPPDATA%\TaskbarQuota）';
+    KeepCheckBox.Caption := '保留配置';
     KeepCheckBox.Checked := True;
     KeepCheckBox.Parent := Form;
 
-    ButtonTop := Form.ClientHeight - ScaleY(23) - ScaleY(16);
+    ButtonTop := KeepCheckBox.Top + KeepCheckBox.Height + ScaleY(8);
+    Form.ClientHeight := ButtonTop + ScaleY(23) + ScaleY(16);
     ButtonWidth := Form.CalculateButtonWidth(['继续卸载', '取消']);
 
     CancelButton := TNewButton.Create(Form);
