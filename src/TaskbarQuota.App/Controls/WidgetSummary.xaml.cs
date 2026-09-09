@@ -600,11 +600,13 @@ namespace TaskbarQuota.Controls
                         and not ProviderErrorKind.NotInstalled));
 
         private static List<WidgetUsageRow> BuildCodexUnavailableRows(UsageResult result)
-            => new()
-            {
-                new WidgetUsageRow(CompactLabel(result.Provider?.SessionLabel ?? "Usage"), 0, "--", HasBar: false),
-                new WidgetUsageRow(CompactLabel(result.Provider?.WeeklyLabel ?? "Usage"), 0, "--", HasBar: false),
-            };
+            => CodexProvider.GetQuotaWindowsForDisplay(result.Provider, result.Fetch?.Usage)
+                .Select(window => new WidgetUsageRow(
+                    CompactLabel(window.Label),
+                    0,
+                    "--",
+                    HasBar: false))
+                .ToList();
 
         internal static IReadOnlyList<(string Label, string Value, bool HasBar)> BuildCodexUnavailableRowsForTesting(UsageResult result)
             => BuildCodexUnavailableRows(result)

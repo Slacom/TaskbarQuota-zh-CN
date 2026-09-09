@@ -72,6 +72,30 @@ public class CodexProviderTests
     }
 
     [Fact]
+    public void WidgetRows_WeeklyOnlyWindow_RendersOnlyWeeklyLabel()
+    {
+        var json = """
+            {
+              "plan_type": "pro",
+              "rate_limit": {
+                "primary_window": {
+                  "used_percent": 12,
+                  "limit_window_seconds": 604800,
+                  "reset_at": 1893542400
+                }
+              }
+            }
+            """;
+        using var doc = JsonDocument.Parse(json);
+        var fetch = CodexProvider.BuildResult(doc.RootElement);
+        var result = UsageResult.Success(ProviderId.Codex, new TestProvider(), fetch);
+
+        Assert.Equal(
+            new[] { "每周额度" },
+            WidgetSummary.BuildRowLabelsForTesting(result, fetch.Usage));
+    }
+
+    [Fact]
     public void BuildResult_SessionOnlyShortWindow_KeepsSessionLabel()
     {
         // A lone sub-day window is still a real 5h session — must not be relabeled Weekly.

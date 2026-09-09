@@ -108,6 +108,34 @@ namespace TaskbarQuota.Usage.Providers
             return new ProviderFetchResult(usage, "oauth");
         }
 
+        /// <summary>
+        /// Identifies a Codex snapshot whose only rate-limit window is weekly. The API may expose that
+        /// window as primary after the session limit is removed, so the label override is part of the
+        /// shape rather than just presentation text.
+        /// </summary>
+        internal static bool IsWeeklyOnlyUsage(UsageSnapshot? usage)
+            => usage is not null
+                && usage.HasPrimaryWindow
+                && usage.Secondary is null
+                && (string.Equals(usage.Primary.Label, "Weekly", StringComparison.OrdinalIgnoreCase)
+                    || usage.Primary.WindowMinutes is int minutes && minutes >= 1440);
+
+        /// <summary>
+        /// Returns the quota rows that should remain visible when live Codex quota is unavailable.
+        /// Without a known live shape, keep both normal subscription windows; a known weekly-only
+        /// snapshot (for example Pro) keeps only Weekly.
+        /// </summary>
+        internal static IReadOnlyList<(bool IsWeekly, string Label)> GetQuotaWindowsForDisplay(
+            IUsageProvider? provider,
+            UsageSnapshot? knownUsage)
+        {
+            string sessionLabel = provider?.SessionLabel ?? "Session";
+            string weeklyLabel = provider?.WeeklyLabel ?? "Weekly";
+            return IsWeeklyOnlyUsage(knownUsage)
+                ? [(true, weeklyLabel)]
+                : [(false, sessionLabel), (true, weeklyLabel)];
+        }
+
         private static async Task<JsonDocument?> FetchResetCreditsAsync(Credentials creds, CancellationToken ct)
         {
             try

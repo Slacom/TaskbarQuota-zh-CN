@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
+using TaskbarQuota.Usage.Providers;
 
 namespace TaskbarQuota.ViewModels
 {
@@ -35,14 +37,20 @@ namespace TaskbarQuota.ViewModels
         public bool IsWidgetToggleEnabled { get; internal set; }
         public string WidgetToggleName => $"在用量小组件中显示“{Label}”";
 
-        public BarViewModel(ProviderId providerId, string widgetRowId, string label, RateWindow w)
+        public BarViewModel(
+            ProviderId providerId,
+            string widgetRowId,
+            string label,
+            RateWindow w,
+            string? valueOverride = null,
+            double? percentOverride = null)
         {
-            double displayPercent = WidgetSettingsService.DisplayPercent(w.UsedPercent);
+            double displayPercent = percentOverride ?? WidgetSettingsService.DisplayPercent(w.UsedPercent);
             ProviderId = providerId;
             WidgetRowId = widgetRowId;
             Label = UiText.TranslateLabel(label);
             Percent = displayPercent;
-            PercentText = WidgetSettingsService.FormatDisplayPercent(w.UsedPercent);
+            PercentText = valueOverride ?? WidgetSettingsService.FormatDisplayPercent(w.UsedPercent);
             ResetText = w.ResetDescription is { } r ? UiText.FormatResetDescription(r) : string.Empty;
             ResetVisibility = w.ResetDescription is null ? Visibility.Collapsed : Visibility.Visible;
             BarBrush = Ui.UsageBrush(displayPercent);
@@ -234,6 +242,22 @@ namespace TaskbarQuota.ViewModels
         public double SuggestedDetailWidth { get; }
         public double SuggestedDetailHeight { get; }
 
+        internal static IReadOnlyList<(string RowId, string Label, double Percent, string Value)> BuildCodexUnavailableBarSpecs(
+            UsageResult result)
+        {
+            var windows = CodexProvider.GetQuotaWindowsForDisplay(result.Provider, result.Fetch?.Usage);
+            bool hasMultipleWindows = windows.Count > 1;
+            return windows
+                .Select((window, index) => (
+                    RowId: hasMultipleWindows && index > 0
+                        ? WidgetSettingsService.RowSecondary
+                        : WidgetSettingsService.RowPrimary,
+                    Label: UiText.TranslateLabel(window.Label),
+                    Percent: 0d,
+                    Value: "--"))
+                .ToList();
+        }
+
         public ProviderCardViewModel(UsageResult r, bool isActive, UsageHistory? usageHistoryOverride = null)
         {
             DisplayName = r.DisplayName;
@@ -280,7 +304,23 @@ namespace TaskbarQuota.ViewModels
                         : "AccentFillColorSecondaryBrush");
                     PricingVisibility = Visibility.Visible;
                 }
-                if (r.Id == ProviderId.OpenCode)
+                if (r.Id == ProviderId.Codex
+                    && r.ObservationOrigin is UsageObservationOrigin.FailureFallback
+                        or UsageObservationOrigin.LocalHistoryFallback)
+                {
+                    foreach (var spec in BuildCodexUnavailableBarSpecs(r))
+                    {
+                        bars.Add(new BarViewModel(
+                            r.Id,
+                            spec.RowId,
+                            spec.Label,
+                            new RateWindow(0),
+                            valueOverride: spec.Value,
+                            percentOverride: spec.Percent));
+                    }
+                    CostText = string.Empty;
+                }
+                else if (r.Id == ProviderId.OpenCode)
                 {
                     var usageVal = u.Cost != null ? u.Cost.Display : "—";
                     var balanceText = u.Secondary?.ResetDescription;
