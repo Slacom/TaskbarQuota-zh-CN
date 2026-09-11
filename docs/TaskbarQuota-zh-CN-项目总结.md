@@ -1,6 +1,6 @@
-# TaskbarQuota 简体中文分支项目总结
+# TaskbarQuota-zh-CN 跨对话交接文档
 
-> 用途：为后续维护、构建、发布和排障对话提供一份可复用的项目上下文。本文记录当前代码状态，不包含任何用户凭据、Cookie、Token 或本机运行数据。
+> 用途：在不同 Codex 对话之间交接本项目的代码、汉化、功能修正、发布和排障上下文。本文记录可复核的项目状态，不包含任何用户凭据、Cookie、Token 或本机运行数据。
 
 ## 当前基线
 
@@ -15,6 +15,33 @@
 | 许可证 | MIT |
 
 版本号需要同时保持以下位置一致：应用项目文件、`Package.appxmanifest`、`installer/TaskbarQuota.iss`、README 中的发布说明，以及最终产物文件名。发布前应以源码中的实际版本和构建产物元数据为准，不要只依据文件名判断版本。
+
+## 当前交接快照（2026-09-11）
+
+| 项目 | 当前事实 |
+| --- | --- |
+| 本地仓库 | `E:\Codex_Workspace\额度显示窗口\TaskbarQuota-zh-CN` |
+| 当前分支 | `localization/zh-CN` |
+| 当前 HEAD | `bf1a5e1d57885e75d5fc29665a3727ad44065903`（`docs: refine README scope`） |
+| 本地工作树 | 已检查，当前无未提交改动 |
+| 中文 Fork 远程 | `fork` → `https://github.com/Slacom/TaskbarQuota-zh-CN.git` |
+| 上游远程 | `origin` → `https://github.com/zioder/TaskbarQuota.git` |
+| Fork 分支最后一次远程确认 | 2026-09-09，远程 `localization/zh-CN` 回读为 `bf1a5e1d57885e75d5fc29665a3727ad44065903` |
+| 2026-09-11 远程复核 | 未完成：通过 `127.0.0.1:10910` 访问 GitHub 443 端口失败；不要据此断言远程今天没有其他变化 |
+| 源码与安装器版本 | `1.3.2.2` |
+
+## 已完成工作范围
+
+- 完成主要 WinUI 页面、任务栏/浮动小组件、托盘菜单、服务卡片、设置、通知、智能体活动和凭据/登录提示的简体中文本地化；
+- 增加动态中文格式化，包括更新时间、重置时间、Token 数量、数据来源、状态和额度提示；
+- 针对 Codex 增加实时额度边界：只有确认的实时读数才能显示；网络失败、请求失败或仅有本地历史时显示 `5小时额度 --` 和 `每周额度 --`，不显示旧额度；
+- 调整服务发现和“隐藏不可用服务”策略：新用户默认显示全部服务，只自动隐藏明确报告为“尚未安装”的服务，且策略可恢复；
+- 同步供应商导航、仪表板开关、服务卡片和托盘入口，避免无效服务回退到 Codex 或意外重新启用；
+- 任务栏空间不足、重新测量或布局变化时只临时隐藏非活动小组件，不改写用户固定偏好；
+- 隔离托盘菜单线程和异常路径，修正托盘图标创建时机并保留 EXE 图标回退；
+- 使用独立中文 AppId、名称和默认安装目录 `TaskbarQuota-zh-CN`，提供 x64 自包含安装包和便携包；
+- 卸载流程增加“保留配置”选择，并处理当前配置、旧版配置和静默卸载路径；
+- README 已精简为四个部分：说明、汉化范围、功能调整、针对 Codex 额度的显示修改。Fork 说明和上游链接位于 README 开头。
 
 ## 项目定位
 
@@ -100,6 +127,12 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 
 自动化通过不等于所有原生桌面交互都已验证。托盘右键、Shell 通知区域图标和特定 DPI/桌面环境应在真实 Windows 会话中抽查；如果测试环境无法提供原生托盘 UI，应在发布记录中明确标注为“未验证”。
 
+### 验证状态解释
+
+- `891/891` 是已有项目记录中的 1.3.2.2 发布前历史测试基线，不是本次 2026-09-11 交接时重新运行的结果；后续代码变更或发布前应重新执行完整测试。
+- 已有重点回归覆盖 Codex 离线占位、服务可见性、导航同步、固定预算、托盘菜单、布局周期和本地化文本；覆盖情况以当前测试文件和最新测试结果为准。
+- 真实 Windows 托盘、通知区域、DPI、多显示器、安装升级和卸载交互仍需独立验收，不能仅凭单元测试通过宣称完成。
+
 ## 发布流程
 
 1. 确认版本、工作树和远程分支；只允许推送到中文 Fork，不推送上游仓库。
@@ -113,6 +146,30 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 
 Release 说明应只描述相对于上游的用户可见功能差异，例如中文界面、独立安装身份、额度不可确认时的中性显示、服务可见性策略和任务栏固定行为。不要在 Release 说明中写“修复 Bug”或未经验证的桌面交互结论；详细排障背景保留在源码文档或维护记录中。
 
+## GitHub Fork 展示与发布状态
+
+- README 的两次本地提交为 `b1c6ff0` 和 `bf1a5e1`，最终提交已通过 VPN 代理 `127.0.0.1:10910` 推送到 `fork/localization/zh-CN`；最后一次远程 SHA 回读记录见“当前交接快照”。
+- GitHub 仓库根地址当前截图显示默认分支仍为 `main`，而中文内容在 `localization/zh-CN`，因此直接进入根地址可能看到上游 `main` 的内容。
+- 若希望进入 `https://github.com/Slacom/TaskbarQuota-zh-CN` 后直接看到中文内容，应在 GitHub 仓库设置中将默认分支改为 `localization/zh-CN`：`Settings → General → Default branch`。
+- `forked from zioder/TaskbarQuota` 是 GitHub 的正常 Fork 关系标识；设置默认分支不会移除它，也不需要把仓库变成独立仓库。
+- 本次交接中没有修改 GitHub 默认分支、没有创建新的 GitHub Release，也没有将任何提交推送到 `origin` 上游仓库。
+
+使用 VPN 推送时只在命令级设置代理，不改变全局 Git 配置：
+
+```powershell
+git -c http.proxy=http://127.0.0.1:10910 `
+    -c https.proxy=http://127.0.0.1:10910 `
+    push fork localization/zh-CN
+```
+
+推送后应使用同一代理回读远程 SHA：
+
+```powershell
+git -c http.proxy=http://127.0.0.1:10910 `
+    -c https.proxy=http://127.0.0.1:10910 `
+    ls-remote fork refs/heads/localization/zh-CN
+```
+
 ## 后续对话的快速入口
 
 - 先检查 `PROJECT_PROGRESS.md`、`latest_run.json` 的习惯不适用于本仓库；本项目应优先查看 `README.md`、本文件、`git status`、当前版本号和 `artifacts/`。
@@ -121,4 +178,5 @@ Release 说明应只描述相对于上游的用户可见功能差异，例如中
 - 讨论“固定消失”时，检查 `PinBudgetService` 是否只影响当前布局，不能把空间不足当成用户取消固定。
 - 讨论安装/卸载时，先确认是否有正在运行的 `TaskbarQuota.exe`，并避免触碰用户现有英文安装和本机配置。
 - 所有发布结论都要区分“源码已实现”“自动化已验证”“真实桌面交互已验证”和“尚未验证”。
-
+- 讨论 GitHub 页面显示内容时，先确认当前打开的分支和仓库默认分支，不要把 `forked from` 标识误判为 README 或代码没有上传。
+- 讨论远程同步时，先检查本地 HEAD、跟踪分支和远程 SHA；若网络或代理失败，只记录为“远程状态未复核”，不要把历史回读结果冒充当前结果。
