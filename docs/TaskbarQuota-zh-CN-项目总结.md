@@ -22,12 +22,14 @@
 | --- | --- |
 | 本地仓库 | `E:\Codex_Workspace\额度显示窗口\TaskbarQuota-zh-CN` |
 | 当前分支 | `localization/zh-CN` |
-| 当前 HEAD | `bf1a5e1d57885e75d5fc29665a3727ad44065903`（`docs: refine README scope`） |
+| 代码与 README 基线 | `bf1a5e1d57885e75d5fc29665a3727ad44065903`（`docs: refine README scope`） |
+| 当前 HEAD | 包含本交接文档的最新本地提交；每次更新本文件后以 `git log -1` 为准 |
 | 本地工作树 | 已检查，当前无未提交改动 |
 | 中文 Fork 远程 | `fork` → `https://github.com/Slacom/TaskbarQuota-zh-CN.git` |
 | 上游远程 | `origin` → `https://github.com/zioder/TaskbarQuota.git` |
 | Fork 分支最后一次远程确认 | 2026-09-09，远程 `localization/zh-CN` 回读为 `bf1a5e1d57885e75d5fc29665a3727ad44065903` |
-| 2026-09-11 远程复核 | 未完成：通过 `127.0.0.1:10910` 访问 GitHub 443 端口失败；不要据此断言远程今天没有其他变化 |
+| 当前 VPN 代理端口 | `127.0.0.1:10909`（用户于 2026-09-11 补充；本次尚未重新验证） |
+| 2026-09-11 远程复核 | 未完成：当时使用旧端口 `127.0.0.1:10910` 访问 GitHub 443 端口失败；当前端口 `10909` 待下次复核 |
 | 源码与安装器版本 | `1.3.2.2` |
 
 ## 已完成工作范围
@@ -148,7 +150,7 @@ Release 说明应只描述相对于上游的用户可见功能差异，例如中
 
 ## GitHub Fork 展示与发布状态
 
-- README 的两次本地提交为 `b1c6ff0` 和 `bf1a5e1`，最终提交已通过 VPN 代理 `127.0.0.1:10910` 推送到 `fork/localization/zh-CN`；最后一次远程 SHA 回读记录见“当前交接快照”。
+- README 的两次本地提交为 `b1c6ff0` 和 `bf1a5e1`，历史上曾通过当时的 VPN 代理 `127.0.0.1:10910` 推送到 `fork/localization/zh-CN`；最后一次远程 SHA 回读记录见“当前交接快照”。当前 VPN 端口改为 `127.0.0.1:10909`。
 - GitHub 仓库根地址当前截图显示默认分支仍为 `main`，而中文内容在 `localization/zh-CN`，因此直接进入根地址可能看到上游 `main` 的内容。
 - 若希望进入 `https://github.com/Slacom/TaskbarQuota-zh-CN` 后直接看到中文内容，应在 GitHub 仓库设置中将默认分支改为 `localization/zh-CN`：`Settings → General → Default branch`。
 - `forked from zioder/TaskbarQuota` 是 GitHub 的正常 Fork 关系标识；设置默认分支不会移除它，也不需要把仓库变成独立仓库。
@@ -157,16 +159,16 @@ Release 说明应只描述相对于上游的用户可见功能差异，例如中
 使用 VPN 推送时只在命令级设置代理，不改变全局 Git 配置：
 
 ```powershell
-git -c http.proxy=http://127.0.0.1:10910 `
-    -c https.proxy=http://127.0.0.1:10910 `
+git -c http.proxy=http://127.0.0.1:10909 `
+    -c https.proxy=http://127.0.0.1:10909 `
     push fork localization/zh-CN
 ```
 
 推送后应使用同一代理回读远程 SHA：
 
 ```powershell
-git -c http.proxy=http://127.0.0.1:10910 `
-    -c https.proxy=http://127.0.0.1:10910 `
+git -c http.proxy=http://127.0.0.1:10909 `
+    -c https.proxy=http://127.0.0.1:10909 `
     ls-remote fork refs/heads/localization/zh-CN
 ```
 
