@@ -9,7 +9,7 @@
 | 上游仓库 | [zioder/TaskbarQuota](https://github.com/zioder/TaskbarQuota) |
 | 中文仓库 | [Slacom/TaskbarQuota-zh-CN](https://github.com/Slacom/TaskbarQuota-zh-CN) |
 | 当前分支 | `localization/zh-CN` |
-| 当前版本 | `1.3.2.2` |
+| 当前版本 | `1.3.2.3` |
 | 目标平台 | Windows x64；WinUI 3；.NET 10；自包含发布 |
 | 发布形式 | 中文安装器、x64 便携 ZIP |
 | 许可证 | MIT |
@@ -20,17 +20,17 @@
 
 | 项目 | 当前事实 |
 | --- | --- |
-| 本地仓库 | `E:\Codex_Workspace\额度显示窗口\TaskbarQuota-zh-CN` |
+| 本地仓库 | `E:\Codex_Workspace\额度显示窗口\TaskbarQuota\TaskbarQuota-zh-CN-1.3.2.3-wt` |
 | 当前分支 | `localization/zh-CN` |
-| 代码与 README 基线 | `bf1a5e1d57885e75d5fc29665a3727ad44065903`（`docs: refine README scope`） |
-| 当前 HEAD | 包含本交接文档的最新本地提交；每次更新本文件后以 `git log -1` 为准 |
-| 本地工作树 | 已检查，当前无未提交改动 |
+| 代码与 README 基线 | `37af120751bde5768c5212059ad0c6a5a3a9521b`（`docs: record current VPN proxy port`） |
+| 当前 HEAD | `37af120751bde5768c5212059ad0c6a5a3a9521b`；修复和测试改动仍未提交 |
+| 本地工作树 | 当前保留修复、打包配置、文档和回归测试改动，未提交、未推送 |
 | 中文 Fork 远程 | `fork` → `https://github.com/Slacom/TaskbarQuota-zh-CN.git` |
 | 上游远程 | `origin` → `https://github.com/zioder/TaskbarQuota.git` |
-| Fork 分支最后一次远程确认 | 2026-09-09，远程 `localization/zh-CN` 回读为 `bf1a5e1d57885e75d5fc29665a3727ad44065903` |
+| Fork 分支最后一次远程确认 | 历史记录：2026-09-09 回读为 `bf1a5e1d57885e75d5fc29665a3727ad44065903`；本次未重新复核 |
 | 当前 VPN 代理端口 | `127.0.0.1:10909`（用户于 2026-09-11 补充；本次尚未重新验证） |
 | 2026-09-11 远程复核 | 未完成：当时使用旧端口 `127.0.0.1:10910` 访问 GitHub 443 端口失败；当前端口 `10909` 待下次复核 |
-| 源码与安装器版本 | `1.3.2.2` |
+| 源码与安装器版本 | `1.3.2.3` |
 
 ## 已完成工作范围
 
@@ -44,6 +44,7 @@
 - 使用独立中文 AppId、名称和默认安装目录 `TaskbarQuota-zh-CN`，提供 x64 自包含安装包和便携包；
 - 卸载流程增加“保留配置”选择，并处理当前配置、旧版配置和静默卸载路径；
 - README 已精简为四个部分：说明、汉化范围、功能调整、针对 Codex 额度的显示修改。Fork 说明和上游链接位于 README 开头。
+- `1.3.2.3` 增加“重置及过期时间显示”设置，可在倒计时和具体时间之间切换；任务栏/悬浮窗保留原有左右分组，并将重置/过期文本放到进度条或次数之后。
 
 ## 项目定位
 
@@ -117,7 +118,7 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 - `TaskbarQuota-<version>-x64-zh-CN-portable.zip`；
 - `TaskbarQuotaSetup-<version>-x64-zh-CN.exe`。
 
-当前 1.3.2.2 发布前已完成的自动化基线为：`.NET` 测试 `891/891` 通过。重点回归范围包括：
+当前 1.3.2.3 工作副本的自动化验证为：`.NET` 测试 `904/904` 通过，自制额度窗口 Node 测试 `33/33` 通过。此前 1.3.2.2 的 `891/891` 是历史基线。重点回归范围包括：
 
 - Codex 离线/本地历史中性占位；
 - 供应商导航与仪表板可见性；
@@ -128,6 +129,14 @@ dotnet test tests/TaskbarQuota.Tests/TaskbarQuota.Tests.csproj
 - 各服务适配器、凭据存储、历史记录和通知。
 
 自动化通过不等于所有原生桌面交互都已验证。托盘右键、Shell 通知区域图标和特定 DPI/桌面环境应在真实 Windows 会话中抽查；如果测试环境无法提供原生托盘 UI，应在发布记录中明确标注为“未验证”。
+
+### 2026-09-11 修复与本地打包结果
+
+- 修复时区相关本地化测试，使期望值按运行环境的本地时区计算。
+- 修复进度条/百分比混合分组的列偏移；无重置文本时不再固定占用 76 DIP；Credits 与 Antigravity 行现在保留绝对重置时间和窗口长度。
+- 自制额度窗口的回退测试显式注入实时额度读取器，避免依赖本机登录会话。
+- 已重新生成 x64 Release 自包含发布目录、便携 ZIP 和中文安装器；最终产物位于工作副本 `artifacts/`：便携 ZIP SHA-256 为 `9ce973f9288cf4ed3057ef77dd881e922c7e55ad4edc324264908031d0035e63`，中文安装器 SHA-256 为 `773aac03b09e067f0542df333265db6e71d2662449947b83952e43a4e3f90239`。
+- 尚未进行真实任务栏/悬浮窗、多 DPI、多显示器、隔离安装升级及卸载交互验收。
 
 ### 验证状态解释
 

@@ -2,28 +2,28 @@
 ; CI: pass absolute /DPublishDir (Inno resolves relative paths from this script's folder).
 
 #ifndef MyAppName
-  #define MyAppName "TaskbarQuota"
+  #define MyAppName "TaskbarQuota-zh-CN"
 #endif
 #ifndef MyAppExeName
   #define MyAppExeName "TaskbarQuota.exe"
 #endif
 #ifndef MyAppId
-  #define MyAppId "{{A7C4E2B1-9F3D-4A8E-B5C6-1D2E3F4A5B6C}"
+  #define MyAppId "{{D4B19A5E-6C62-4D84-9F1B-0A7C58E2F3D4}"
 #endif
 #ifndef MyAppIdValue
-  #define MyAppIdValue "A7C4E2B1-9F3D-4A8E-B5C6-1D2E3F4A5B6C"
+  #define MyAppIdValue "D4B19A5E-6C62-4D84-9F1B-0A7C58E2F3D4"
 #endif
 #ifndef MyDefaultDir
-  #define MyDefaultDir "{autopf}\TaskbarQuota"
+  #define MyDefaultDir "{autopf}\TaskbarQuota-zh-CN"
 #endif
 #ifndef MyDefaultGroupName
-  #define MyDefaultGroupName "TaskbarQuota"
+  #define MyDefaultGroupName "TaskbarQuota-zh-CN"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\src\TaskbarQuota.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.2.2"
+  #define MyAppVersion "1.3.2.3"
 #endif
 #ifndef TargetArch
   #define TargetArch "x64"
@@ -67,7 +67,7 @@ MinVersion=10.0.19041
 PrivilegesRequired=lowest
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

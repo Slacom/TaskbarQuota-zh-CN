@@ -25,8 +25,11 @@ namespace TaskbarQuota.Controls
     {
         private const int MaxRowsPerGroup = 2;
         private const int MinLabelColumnWidth = 0;
-        private const int MinResetColumnWidth = 0;
+        // Keep the reset column visually stable between the 5-hour and weekly rows. Longer provider
+        // descriptions may still expand it so the reset text is never clipped.
+        private const int ResetColumnWidth = 76;
         private const int ValueColumnWidth = 34;
+        private const int CompactValueColumnWidth = 16;
         private const int WidgetFontSize = 11;
         private const int BarHeight = 6;
         private const int SingleRowBarHeight = 8;
@@ -540,7 +543,9 @@ namespace TaskbarQuota.Controls
                         0,
                         resetCredits.AvailableCount.ToString("N0", CultureInfo.InvariantCulture),
                         expiresIn,
-                        HasBar: false));
+                        HasBar: false,
+                        ResetAt: resetCredits.EarliestExpiresAt,
+                        IsExpiry: true));
                 }
 
                 if (WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowExtra))
@@ -549,7 +554,9 @@ namespace TaskbarQuota.Controls
                         CompactLabel(w.Title),
                         WidgetSettingsService.DisplayPercent(w.Window.UsedPercent),
                         WidgetSettingsService.FormatDisplayPercent(w.Window.UsedPercent),
-                        w.Window.ResetDescription)));
+                        w.Window.ResetDescription,
+                        ResetAt: w.Window.ResetAt,
+                        ResetWindowMinutes: w.Window.WindowMinutes)));
                 }
                 return rows;
             }
@@ -565,7 +572,9 @@ namespace TaskbarQuota.Controls
                         CompactLabel(w.Title),
                         WidgetSettingsService.DisplayPercent(w.Window.UsedPercent),
                         WidgetSettingsService.FormatDisplayPercent(w.Window.UsedPercent),
-                        w.Window.ResetDescription)));
+                        w.Window.ResetDescription,
+                        ResetAt: w.Window.ResetAt,
+                        ResetWindowMinutes: w.Window.WindowMinutes)));
                 }
                 return rows;
             }
@@ -579,7 +588,9 @@ namespace TaskbarQuota.Controls
                             CompactLabel(w.Title),
                             WidgetSettingsService.DisplayPercent(w.Window.UsedPercent),
                             WidgetSettingsService.FormatDisplayPercent(w.Window.UsedPercent),
-                            w.Window.ResetDescription))
+                            w.Window.ResetDescription,
+                            ResetAt: w.Window.ResetAt,
+                            ResetWindowMinutes: w.Window.WindowMinutes))
                         .ToList();
                 }
                 return new List<WidgetUsageRow>();
@@ -695,7 +706,9 @@ namespace TaskbarQuota.Controls
                     CompactLabel(primaryLabel),
                     WidgetSettingsService.DisplayPercent(usage.Primary.UsedPercent),
                     primaryValue,
-                    usage.Primary.ResetDescription));
+                    usage.Primary.ResetDescription,
+                    ResetAt: usage.Primary.ResetAt,
+                    ResetWindowMinutes: usage.Primary.WindowMinutes));
             }
             if (usage.Secondary != null && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowSecondary))
             {
@@ -704,7 +717,9 @@ namespace TaskbarQuota.Controls
                     CompactLabel(secondaryLabel),
                     WidgetSettingsService.DisplayPercent(usage.Secondary.UsedPercent),
                     WidgetSettingsService.FormatDisplayPercent(usage.Secondary.UsedPercent),
-                    usage.Secondary.ResetDescription));
+                    usage.Secondary.ResetDescription,
+                    ResetAt: usage.Secondary.ResetAt,
+                    ResetWindowMinutes: usage.Secondary.WindowMinutes));
             }
             if (usage.ModelSpecific != null && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowModelSpecific))
             {
@@ -712,7 +727,9 @@ namespace TaskbarQuota.Controls
                     CompactLabel(usage.ModelSpecific.Label ?? ModelSpecificLabel(result.Id)),
                     WidgetSettingsService.DisplayPercent(usage.ModelSpecific.UsedPercent),
                     WidgetSettingsService.FormatDisplayPercent(usage.ModelSpecific.UsedPercent),
-                    usage.ModelSpecific.ResetDescription));
+                    usage.ModelSpecific.ResetDescription,
+                    ResetAt: usage.ModelSpecific.ResetAt,
+                    ResetWindowMinutes: usage.ModelSpecific.WindowMinutes));
             }
             if (usage.Monthly != null && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowMonthly))
             {
@@ -720,7 +737,9 @@ namespace TaskbarQuota.Controls
                     "Monthly",
                     WidgetSettingsService.DisplayPercent(usage.Monthly.UsedPercent),
                     WidgetSettingsService.FormatDisplayPercent(usage.Monthly.UsedPercent),
-                    usage.Monthly.ResetDescription));
+                    usage.Monthly.ResetDescription,
+                    ResetAt: usage.Monthly.ResetAt,
+                    ResetWindowMinutes: usage.Monthly.WindowMinutes));
             }
 
             return rows;
@@ -735,21 +754,27 @@ namespace TaskbarQuota.Controls
                     CompactLabel(result.Provider?.WeeklyLabel ?? "Auto + Composer Usage"),
                     WidgetSettingsService.DisplayPercent(usage.Secondary.UsedPercent),
                     WidgetSettingsService.FormatDisplayPercent(usage.Secondary.UsedPercent),
-                    usage.Secondary.ResetDescription));
+                    usage.Secondary.ResetDescription,
+                    ResetAt: usage.Secondary.ResetAt,
+                    ResetWindowMinutes: usage.Secondary.WindowMinutes));
 
             if (usage.ModelSpecific != null && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowModelSpecific))
                 rows.Add(new WidgetUsageRow(
                     CompactLabel(ModelSpecificLabel(result.Id)),
                     WidgetSettingsService.DisplayPercent(usage.ModelSpecific.UsedPercent),
                     WidgetSettingsService.FormatDisplayPercent(usage.ModelSpecific.UsedPercent),
-                    usage.ModelSpecific.ResetDescription));
+                    usage.ModelSpecific.ResetDescription,
+                    ResetAt: usage.ModelSpecific.ResetAt,
+                    ResetWindowMinutes: usage.ModelSpecific.WindowMinutes));
 
             if (WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowPrimary))
                 rows.Add(new WidgetUsageRow(
                     CompactLabel(result.Provider?.SessionLabel ?? "Total usage"),
                     WidgetSettingsService.DisplayPercent(usage.Primary.UsedPercent),
                     WidgetSettingsService.FormatDisplayPercent(usage.Primary.UsedPercent),
-                    usage.Primary.ResetDescription));
+                    usage.Primary.ResetDescription,
+                    ResetAt: usage.Primary.ResetAt,
+                    ResetWindowMinutes: usage.Primary.WindowMinutes));
 
             return rows;
         }
@@ -823,11 +848,7 @@ namespace TaskbarQuota.Controls
             }
             if (WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowCredits))
             {
-                rows.Add(new WidgetUsageRow(
-                    "Credits",
-                    usedPercent,
-                    value,
-                    usage.Primary.ResetDescription));
+                rows.Add(BuildCreditsRow(usage, usedPercent, value));
             }
 
             if (usage.AdditionalUsage is { Enabled: true } additional && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowAdditionalUsage))
@@ -866,6 +887,21 @@ namespace TaskbarQuota.Controls
             tooltip += WidgetUsageHistoryTooltipLine(usage.UsageHistory);
             tooltip += StaleTooltipLine(result);
             ToolTipService.SetToolTip(this, tooltip);
+        }
+
+        private static WidgetUsageRow BuildCreditsRow(UsageSnapshot usage, double usedPercent, string value)
+            => new(
+                "Credits",
+                usedPercent,
+                value,
+                usage.Primary.ResetDescription,
+                ResetAt: usage.Primary.ResetAt,
+                ResetWindowMinutes: usage.Primary.WindowMinutes);
+
+        internal static (DateTimeOffset? ResetAt, int? WindowMinutes) GetCreditsResetMetadataForTesting(UsageSnapshot usage)
+        {
+            var row = BuildCreditsRow(usage, 0, string.Empty);
+            return (row.ResetAt, row.ResetWindowMinutes);
         }
 
         /// <summary>
@@ -966,32 +1002,7 @@ namespace TaskbarQuota.Controls
 
         private void ApplyAntigravityDisplay(UsageResult result, UsageSnapshot usage, bool providerChanged = false)
         {
-            var rows = new List<WidgetUsageRow>();
-            // Icon already conveys the model family (Gemini vs Non-Gemini), so the widget row only needs the window.
-            if (WidgetSettingsService.IsRowVisible(ProviderId.Antigravity, WidgetSettingsService.RowPrimary))
-            {
-                rows.Add(new WidgetUsageRow("Weekly", WidgetSettingsService.DisplayPercent(usage.Primary.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.Primary.UsedPercent), usage.Primary.ResetDescription,
-                    GlyphData: ProviderGlyphs.Gemini));
-            }
-            if (usage.ModelSpecific != null && WidgetSettingsService.IsRowVisible(ProviderId.Antigravity, WidgetSettingsService.RowModelSpecific))
-            {
-                rows.Add(new WidgetUsageRow("5h", WidgetSettingsService.DisplayPercent(usage.ModelSpecific.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.ModelSpecific.UsedPercent), usage.ModelSpecific.ResetDescription,
-                    GlyphData: ProviderGlyphs.Gemini));
-            }
-            if (usage.Secondary != null && WidgetSettingsService.IsRowVisible(ProviderId.Antigravity, WidgetSettingsService.RowSecondary))
-            {
-                rows.Add(new WidgetUsageRow("Weekly", WidgetSettingsService.DisplayPercent(usage.Secondary.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.Secondary.UsedPercent), usage.Secondary.ResetDescription,
-                    GlyphData: ProviderGlyphs.GeminiBarred));
-            }
-            if (usage.Monthly != null && WidgetSettingsService.IsRowVisible(ProviderId.Antigravity, WidgetSettingsService.RowMonthly))
-            {
-                rows.Add(new WidgetUsageRow("5h", WidgetSettingsService.DisplayPercent(usage.Monthly.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.Monthly.UsedPercent), usage.Monthly.ResetDescription,
-                    GlyphData: ProviderGlyphs.GeminiBarred));
-            }
+            var rows = BuildAntigravityRows(usage);
             _rows = rows;
             if (_rows.Count == 0)
             {
@@ -1015,6 +1026,54 @@ namespace TaskbarQuota.Controls
                 this,
                 header + body + WidgetUsageHistoryTooltipLine(usage.UsageHistory) + StaleTooltipLine(result));
         }
+
+        private static List<WidgetUsageRow> BuildAntigravityRows(
+            UsageSnapshot usage,
+            Func<string, bool>? isRowVisible = null)
+        {
+            isRowVisible ??= row => WidgetSettingsService.IsRowVisible(ProviderId.Antigravity, row);
+            var rows = new List<WidgetUsageRow>();
+            // Icon already conveys the model family (Gemini vs Non-Gemini), so the widget row only needs the window.
+            if (isRowVisible(WidgetSettingsService.RowPrimary))
+            {
+                rows.Add(new WidgetUsageRow("Weekly", WidgetSettingsService.DisplayPercent(usage.Primary.UsedPercent),
+                    WidgetSettingsService.FormatDisplayPercent(usage.Primary.UsedPercent), usage.Primary.ResetDescription,
+                    ResetAt: usage.Primary.ResetAt,
+                    ResetWindowMinutes: usage.Primary.WindowMinutes,
+                    GlyphData: ProviderGlyphs.Gemini));
+            }
+            if (usage.ModelSpecific != null && isRowVisible(WidgetSettingsService.RowModelSpecific))
+            {
+                rows.Add(new WidgetUsageRow("5h", WidgetSettingsService.DisplayPercent(usage.ModelSpecific.UsedPercent),
+                    WidgetSettingsService.FormatDisplayPercent(usage.ModelSpecific.UsedPercent), usage.ModelSpecific.ResetDescription,
+                    ResetAt: usage.ModelSpecific.ResetAt,
+                    ResetWindowMinutes: usage.ModelSpecific.WindowMinutes,
+                    GlyphData: ProviderGlyphs.Gemini));
+            }
+            if (usage.Secondary != null && isRowVisible(WidgetSettingsService.RowSecondary))
+            {
+                rows.Add(new WidgetUsageRow("Weekly", WidgetSettingsService.DisplayPercent(usage.Secondary.UsedPercent),
+                    WidgetSettingsService.FormatDisplayPercent(usage.Secondary.UsedPercent), usage.Secondary.ResetDescription,
+                    ResetAt: usage.Secondary.ResetAt,
+                    ResetWindowMinutes: usage.Secondary.WindowMinutes,
+                    GlyphData: ProviderGlyphs.GeminiBarred));
+            }
+            if (usage.Monthly != null && isRowVisible(WidgetSettingsService.RowMonthly))
+            {
+                rows.Add(new WidgetUsageRow("5h", WidgetSettingsService.DisplayPercent(usage.Monthly.UsedPercent),
+                    WidgetSettingsService.FormatDisplayPercent(usage.Monthly.UsedPercent), usage.Monthly.ResetDescription,
+                    ResetAt: usage.Monthly.ResetAt,
+                    ResetWindowMinutes: usage.Monthly.WindowMinutes,
+                    GlyphData: ProviderGlyphs.GeminiBarred));
+            }
+            return rows;
+        }
+
+        internal static IReadOnlyList<(string Label, DateTimeOffset? ResetAt, int? ResetWindowMinutes)>
+            GetAntigravityResetMetadataForTesting(UsageSnapshot usage)
+            => BuildAntigravityRows(usage, _ => true)
+                .Select(row => (row.Label, row.ResetAt, row.ResetWindowMinutes))
+                .ToArray();
 
         private void OnWidgetSettingsChanged(object? sender, EventArgs e)
         {
@@ -1230,7 +1289,7 @@ namespace TaskbarQuota.Controls
                 bool isSingleRowGroup = rows.Count == 1 && groupCount == 1;
                 var layout = CalculateLayoutMetrics(rows, mode, group);
                 int firstColumn = EnsureGroupColumns(mode, group, layout);
-                AddRow(rows[i], mode, isSingleRowGroup ? 0 : row, firstColumn, showBars, showPercentages, barWidth, isSingleRowGroup);
+                AddRow(rows[i], mode, isSingleRowGroup ? 0 : row, firstColumn, showBars, showPercentages, barWidth, layout.HasBar, isSingleRowGroup);
             }
 
             ApplyTaskbarForeground();
@@ -1277,25 +1336,54 @@ namespace TaskbarQuota.Controls
                 {
                     case WidgetDisplayMode.PercentagesOnly:
                         Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.LabelWidth) });
-                        Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ResetWidth) });
                         Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ValueWidth) });
+                        Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ResetWidth) });
                         break;
                     case WidgetDisplayMode.BarsAndPercentages:
                         Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.LabelWidth) });
-                        Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ResetWidth) });
-                        Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(BarColumnWidthBarsAndPercentages) });
-                        Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ValueWidth) });
+                        if (layout.HasBar)
+                        {
+                            Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(BarColumnWidthBarsAndPercentages) });
+                            Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ValueWidth) });
+                            Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ResetWidth) });
+                        }
+                        else
+                        {
+                            Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ValueWidth) });
+                            Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ResetWidth) });
+                            Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
+                        }
                         break;
                     default:
                         Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.LabelWidth) });
+                        Panel.ColumnDefinitions.Add(new ColumnDefinition
+                        {
+                            Width = new GridLength(layout.HasBar ? BarColumnWidthBarsOnly : layout.ValueWidth),
+                        });
                         Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ResetWidth) });
-                        Panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(BarColumnWidthBarsOnly) });
                         break;
                 }
             }
 
             return 1 + (group * columnsPerGroup);
         }
+
+        private static (int ValueOffset, int ResetOffset) GetRowColumnOffsets(
+            WidgetDisplayMode mode,
+            bool groupHasBar,
+            bool rowHasBar)
+        {
+            if (mode == WidgetDisplayMode.BarsAndPercentages && (groupHasBar || rowHasBar))
+                return (2, 3);
+
+            return (1, 2);
+        }
+
+        internal static (int ValueOffset, int ResetOffset) GetRowColumnOffsetsForTesting(
+            WidgetDisplayMode mode,
+            bool groupHasBar,
+            bool rowHasBar)
+            => GetRowColumnOffsets(mode, groupHasBar, rowHasBar);
 
         /// <summary>The rows this tile draws — everything the user enabled, or the placeholder until the
         /// first result lands. Never copies: the measure and render paths both run on every usage publish.
@@ -1332,8 +1420,10 @@ namespace TaskbarQuota.Controls
                 total += mode switch
                 {
                     WidgetDisplayMode.PercentagesOnly => layout.ValueWidth,
-                    WidgetDisplayMode.BarsAndPercentages => BarColumnWidthBarsAndPercentages + layout.ValueWidth,
-                    _ => BarColumnWidthBarsOnly,
+                    WidgetDisplayMode.BarsAndPercentages => layout.HasBar
+                        ? BarColumnWidthBarsAndPercentages + layout.ValueWidth
+                        : layout.ValueWidth,
+                    _ => layout.HasBar ? BarColumnWidthBarsOnly : layout.ValueWidth,
                 };
                 columnCount += columnsPerGroup;
             }
@@ -1353,6 +1443,8 @@ namespace TaskbarQuota.Controls
             // measure at that size — otherwise the label ("Credits") is sized too narrow and clips.
             bool isSingleRowGroup = rows.Count == 1 && count == 1;
             int labelFont = isSingleRowGroup ? WidgetFontSize + 1 : WidgetFontSize;
+            bool groupHasBar = rows.Skip(start).Take(count).Any(row => row.HasBar);
+            bool compactValueGroup = rows.Skip(start).Take(count).All(row => row.IsExpiry);
             double widestLabel = 0;
             double widestReset = 0;
             for (int i = 0; i < count; i++)
@@ -1360,8 +1452,11 @@ namespace TaskbarQuota.Controls
                 var row = rows[start + i];
                 double iconWidth = row.GlyphData != null ? RowLabelGlyphReserve : 0;
                 widestLabel = Math.Max(widestLabel, MeasureTextWidth(BaseLabelText(row, mode), labelFont) + iconWidth);
-                if (!string.IsNullOrWhiteSpace(row.ResetDescription))
-                    widestReset = Math.Max(widestReset, MeasureTextWidth($"({CompactResetDescription(row.ResetDescription)})", labelFont));
+                var resetLabel = FormatWidgetResetText(row);
+                if (!string.IsNullOrWhiteSpace(resetLabel))
+                    widestReset = Math.Max(
+                        widestReset,
+                        MeasureResetTextWidth($"({resetLabel})", labelFont));
             }
 
             double widestValue = 0;
@@ -1378,9 +1473,16 @@ namespace TaskbarQuota.Controls
 
             return new WidgetLayoutMetrics(
                 Math.Max(MinLabelColumnWidth, widestLabel + 3),
-                widestReset == 0 ? MinResetColumnWidth : widestReset + 2,
-                Math.Max(ValueColumnWidth, widestValue + 4));
+                GetResetColumnWidth(widestReset),
+                Math.Max(compactValueGroup ? CompactValueColumnWidth : ValueColumnWidth, widestValue + 4),
+                groupHasBar);
         }
+
+        private static double GetResetColumnWidth(double widestReset)
+            => widestReset <= 0 ? 0 : Math.Max(ResetColumnWidth, widestReset + 2);
+
+        internal static double GetResetColumnWidthForTesting(double widestReset)
+            => GetResetColumnWidth(widestReset);
 
         private void AddRow(
             WidgetUsageRow usageRow,
@@ -1390,18 +1492,21 @@ namespace TaskbarQuota.Controls
             bool showBars,
             bool showPercentages,
             double barWidth,
+            bool groupHasBar,
             bool isSingleRowGroup)
         {
             int rowSpan = isSingleRowGroup ? MaxRowsPerGroup : 1;
             int textSize = isSingleRowGroup ? WidgetFontSize + 1 : WidgetFontSize;
             bool compactTextOnlyValue = !usageRow.HasBar && mode != WidgetDisplayMode.PercentagesOnly;
+            bool leftAlignCompactValue = compactTextOnlyValue && !usageRow.IsExpiry;
             var value = CreateText(
                 usageRow.Value,
                 0.86,
-                compactTextOnlyValue ? TextAlignment.Left : TextAlignment.Center,
+                leftAlignCompactValue ? TextAlignment.Left : TextAlignment.Center,
                 textSize);
             value.Foreground = usageRow.ForegroundBrush ?? Foreground;
             var reset = CreateResetText(usageRow, textSize);
+            var columnOffsets = GetRowColumnOffsets(mode, groupHasBar, usageRow.HasBar);
 
             FrameworkElement label;
             if (usageRow.GlyphData != null)
@@ -1444,39 +1549,41 @@ namespace TaskbarQuota.Controls
             {
                 case WidgetDisplayMode.PercentagesOnly:
                     AddToPanel(label, row, firstColumn, rowSpan);
-                    AddToPanel(reset, row, firstColumn + 1, rowSpan);
-                    AddToPanel(value, row, firstColumn + 2, rowSpan);
+                    AddToPanel(value, row, firstColumn + columnOffsets.ValueOffset, rowSpan);
+                    AddToPanel(reset, row, firstColumn + columnOffsets.ResetOffset, rowSpan);
                     break;
 
                 case WidgetDisplayMode.BarsAndPercentages:
                     value.Visibility = showPercentages ? Visibility.Visible : Visibility.Collapsed;
                     AddToPanel(label, row, firstColumn, rowSpan);
-                    AddToPanel(reset, row, firstColumn + 1, rowSpan);
                     if (usageRow.HasBar)
                     {
                         barHost.Visibility = showBars ? Visibility.Visible : Visibility.Collapsed;
-                        AddToPanel(barHost, row, firstColumn + 2, rowSpan);
-                        AddToPanel(value, row, firstColumn + 3, rowSpan);
+                        AddToPanel(barHost, row, firstColumn + 1, rowSpan);
+                        AddToPanel(value, row, firstColumn + columnOffsets.ValueOffset, rowSpan);
                     }
                     else
                     {
-                        Grid.SetColumnSpan(value, 2);
-                        AddToPanel(value, row, firstColumn + 2, rowSpan);
+                        Grid.SetColumnSpan(value, 1);
+                        AddToPanel(value, row, firstColumn + columnOffsets.ValueOffset, rowSpan);
+                        AddToPanel(reset, row, firstColumn + columnOffsets.ResetOffset, rowSpan);
+                        break;
                     }
+                    AddToPanel(reset, row, firstColumn + columnOffsets.ResetOffset, rowSpan);
                     break;
 
                 default:
                     AddToPanel(label, row, firstColumn, rowSpan);
-                    AddToPanel(reset, row, firstColumn + 1, rowSpan);
                     if (usageRow.HasBar)
                     {
                         barHost.Visibility = showBars ? Visibility.Visible : Visibility.Collapsed;
-                        AddToPanel(barHost, row, firstColumn + 2, rowSpan);
+                        AddToPanel(barHost, row, firstColumn + columnOffsets.ValueOffset, rowSpan);
                     }
                     else
                     {
-                        AddToPanel(value, row, firstColumn + 2, rowSpan);
+                        AddToPanel(value, row, firstColumn + columnOffsets.ValueOffset, rowSpan);
                     }
+                    AddToPanel(reset, row, firstColumn + columnOffsets.ResetOffset, rowSpan);
                     break;
             }
 
@@ -1566,13 +1673,32 @@ namespace TaskbarQuota.Controls
 
         private TextBlock CreateResetText(WidgetUsageRow row, int fontSize = WidgetFontSize)
         {
-            if (string.IsNullOrWhiteSpace(row.ResetDescription))
+            var resetLabel = FormatWidgetResetText(row);
+            if (string.IsNullOrWhiteSpace(resetLabel))
                 return CreateText("", 0.9, TextAlignment.Left, fontSize);
 
-            var reset = CreateText($"({CompactResetDescription(row.ResetDescription)})", 0.9, TextAlignment.Left, fontSize);
-            reset.Foreground = ResetBrush(row.ResetDescription);
+            var reset = CreateText($"({resetLabel})", 0.9, TextAlignment.Left, fontSize);
+            reset.FontFamily = new FontFamily("Segoe UI Variable Text");
+            reset.Foreground = ResetBrush(row.ResetDescription ?? "");
             reset.TextTrimming = TextTrimming.None;
             return reset;
+        }
+
+        /// <summary>Compact reset suffix for a widget row under the active reset display mode.</summary>
+        private static string FormatWidgetResetText(WidgetUsageRow row)
+        {
+            if (WidgetSettingsService.CurrentResetDisplayMode == ResetDisplayMode.AbsoluteTime)
+            {
+                var absolute = row.IsExpiry
+                    ? UiText.FormatWidgetAbsoluteExpiry(row.ResetAt)
+                    : UiText.FormatWidgetAbsoluteReset(row.ResetAt, row.ResetWindowMinutes);
+                if (!string.IsNullOrEmpty(absolute))
+                    return absolute;
+            }
+
+            return string.IsNullOrWhiteSpace(row.ResetDescription)
+                ? string.Empty
+                : CompactResetDescription(row.ResetDescription);
         }
 
         private void AddToPanel(FrameworkElement element, int row, int column, int rowSpan = 1)
@@ -1699,6 +1825,9 @@ namespace TaskbarQuota.Controls
 
             parts.Add(window.UsedPercent.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
             parts.Add(window.ResetDescription ?? string.Empty);
+            parts.Add(window.ResetAt?.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+            parts.Add(window.WindowMinutes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+            parts.Add(((int)WidgetSettingsService.CurrentResetDisplayMode).ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         private static string FormatPlanLabel(ProviderId id, string displayName, string? loginMethod)
@@ -1711,6 +1840,13 @@ namespace TaskbarQuota.Controls
 
             if (row.Label == "Resets")
             {
+                if (WidgetSettingsService.CurrentResetDisplayMode == ResetDisplayMode.AbsoluteTime)
+                {
+                    string absolute = FormatWidgetResetText(row);
+                    if (!string.IsNullOrWhiteSpace(absolute))
+                        return $"{DisplayLabel(row.Label)}：{row.Value} - {absolute}";
+                }
+
                 string expiry = row.ResetDescription == "now"
                     ? "最早的一次即将到期"
                     : $"最早的一次将在 {UiText.FormatDuration(row.ResetDescription)}后到期";
@@ -1727,6 +1863,21 @@ namespace TaskbarQuota.Controls
             => mode == WidgetDisplayMode.PercentagesOnly ? DisplayLabel(row.Label) + "：" : DisplayLabel(row.Label);
 
         private static double MeasureTextWidth(string text, int fontSize = WidgetFontSize)
+        {
+            var textBlock = new TextBlock
+            {
+                Text = text,
+                FontFamily = new FontFamily("Segoe UI Variable Text"),
+                FontSize = fontSize,
+                FontWeight = Microsoft.UI.Text.FontWeights.Normal,
+            };
+            textBlock.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            return Math.Ceiling(textBlock.DesiredSize.Width);
+        }
+
+        private static double MeasureResetTextWidth(
+            string text,
+            int fontSize = WidgetFontSize)
         {
             var textBlock = new TextBlock
             {
@@ -1863,7 +2014,10 @@ namespace TaskbarQuota.Controls
             string? ResetDescription = null,
             bool HasBar = true,
             string? GlyphData = null,
-            Brush? ForegroundBrush = null);
+            Brush? ForegroundBrush = null,
+            DateTimeOffset? ResetAt = null,
+            int? ResetWindowMinutes = null,
+            bool IsExpiry = false);
 
         private sealed record RenderedRow(
             WidgetUsageRow Source,
@@ -1874,6 +2028,6 @@ namespace TaskbarQuota.Controls
             TextBlock Value,
             TextBlock? Reset = null);
 
-        private sealed record WidgetLayoutMetrics(double LabelWidth, double ResetWidth, double ValueWidth);
+        private sealed record WidgetLayoutMetrics(double LabelWidth, double ResetWidth, double ValueWidth, bool HasBar);
     }
 }

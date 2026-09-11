@@ -163,6 +163,9 @@ internal static partial class UiText
             ["Use AI normally"] = "照常使用 AI",
             ["Warning threshold"] = "警告阈值",
             ["Now"] = "现在",
+            ["Reset and expiry time display"] = "重置及过期时间显示",
+            ["Countdown"] = "剩余时间",
+            ["Absolute time"] = "具体时间",
         };
 
     public static string Get(string key)
@@ -211,6 +214,37 @@ internal static partial class UiText
 
     public static string FormatResetAt(DateTimeOffset value)
         => $"{value:yyyy年M月d日 HH:mm} 重置";
+
+    /// <summary>
+    /// Compact absolute reset label for the taskbar/floating widget, Codex-desktop style:
+    /// session windows show local clock time (18:21); weekly windows show a calendar date
+    /// (9月15日), or day+hour (15日18时) when the reset lands on the current local day.
+    /// Returns empty when no absolute timestamp is available.
+    /// </summary>
+    public static string FormatWidgetAbsoluteReset(DateTimeOffset? resetAt, int? windowMinutes)
+    {
+        if (resetAt is not DateTimeOffset at)
+            return string.Empty;
+
+        var local = at.ToLocalTime();
+        bool isLongWindow = windowMinutes is null or >= 1440;
+        if (!isLongWindow)
+            return local.ToString("H时mm分", CultureInfo.InvariantCulture);
+
+        if (local.Date == DateTimeOffset.Now.Date)
+            return $"{local.Day}日{local.Hour:D2}时";
+
+        return local.ToString("MM月dd日", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Formats an absolute expiry timestamp without a timezone suffix.</summary>
+    public static string FormatWidgetAbsoluteExpiry(DateTimeOffset? expiresAt)
+    {
+        if (expiresAt is not DateTimeOffset value)
+            return string.Empty;
+
+        return value.ToLocalTime().ToString("M月d日 HH:mm", CultureInfo.InvariantCulture);
+    }
 
     public static string FormatTokens(long tokens)
     {

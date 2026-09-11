@@ -37,6 +37,9 @@ public sealed class LocalizationTests
         "Percentage display",
         "Consumed",
         "Remaining",
+        "Reset and expiry time display",
+        "Countdown",
+        "Absolute time",
         "Where to show usage",
         "In the taskbar",
         "Floating always-on-top window",
@@ -120,6 +123,60 @@ public sealed class LocalizationTests
         var value = new DateTimeOffset(2026, 10, 4, 9, 6, 0, TimeSpan.FromHours(8));
 
         Assert.Equal("2026年10月4日 09:06 重置", UiText.FormatResetAt(value));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteReset_SessionWindow_ShowsLocalClockTime()
+    {
+        var localNow = DateTimeOffset.Now;
+        var resetAt = new DateTimeOffset(localNow.Date.AddHours(18).AddMinutes(21), localNow.Offset);
+
+        Assert.Equal("18时21分", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 300));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteReset_WeeklySameLocalDay_ShowsDayAndHour()
+    {
+        var localNow = DateTimeOffset.Now;
+        var resetAt = new DateTimeOffset(localNow.Date.AddHours(18), localNow.Offset);
+
+        Assert.Equal($"{localNow.Day}日18时", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteReset_WeeklyOtherDay_ShowsMonthAndDay()
+    {
+        var localNow = DateTimeOffset.Now;
+        var resetAt = new DateTimeOffset(localNow.Date.AddDays(4).AddHours(9), localNow.Offset);
+
+        var expected = $"{resetAt.Month:D2}月{resetAt.Day:D2}日";
+        Assert.Equal(expected, UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteReset_UnknownWindowMinutes_UsesWeeklyStyle()
+    {
+        var localNow = DateTimeOffset.Now;
+        var resetAt = new DateTimeOffset(localNow.Date.AddDays(2).AddHours(1), localNow.Offset);
+
+        var expected = $"{resetAt.Month:D2}月{resetAt.Day:D2}日";
+        Assert.Equal(expected, UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: null));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteReset_MissingTimestamp_ReturnsEmpty()
+    {
+        Assert.Equal(string.Empty, UiText.FormatWidgetAbsoluteReset(null, 300));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteExpiry_UsesLocalMonthDayAndTime()
+    {
+        var value = new DateTimeOffset(2026, 10, 4, 9, 6, 0, TimeSpan.FromHours(8));
+        var local = value.ToLocalTime();
+        var expected = $"{local.Month}月{local.Day}日 {local.Hour:D2}:{local.Minute:D2}";
+
+        Assert.Equal(expected, UiText.FormatWidgetAbsoluteExpiry(value));
     }
 
     [Theory]

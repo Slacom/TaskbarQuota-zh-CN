@@ -21,6 +21,15 @@ public enum PercentageDisplayMode
     Remaining = 1,
 }
 
+/// <summary>How the taskbar/floating widget shows a quota window's reset moment.</summary>
+public enum ResetDisplayMode
+{
+    /// <summary>Remaining time until reset, e.g. 3小时38分.</summary>
+    Countdown = 0,
+    /// <summary>Local clock/date of the reset, Codex-desktop style, e.g. 18:21 / 9月15日.</summary>
+    AbsoluteTime = 1,
+}
+
 /// <summary>
 /// Where the compact usage UI is hosted: injected into each taskbar, or a single always-on-top
 /// floating window. Modes are mutually exclusive.
@@ -81,6 +90,9 @@ public static class WidgetSettingsService
     private static readonly string PercentageDisplayModePath =
         Path.Combine(AppStorage.AppDataDirectory, "percentage-display-mode.txt");
 
+    private static readonly string ResetDisplayModePath =
+        Path.Combine(AppStorage.AppDataDirectory, "reset-display-mode.txt");
+
     private static readonly string WidgetRowsPath =
         Path.Combine(AppStorage.AppDataDirectory, "widget-rows.json");
 
@@ -125,6 +137,7 @@ public static class WidgetSettingsService
     /// <summary>Floating window Acrylic strength in the range [<see cref="FloatingOpacityMin"/>, <see cref="FloatingOpacityMax"/>].</summary>
     public static double FloatingOpacity { get; private set; } = LoadFloatingOpacity();
     public static PercentageDisplayMode CurrentPercentageMode { get; private set; } = LoadPercentageDisplayMode();
+    public static ResetDisplayMode CurrentResetDisplayMode { get; private set; } = LoadResetDisplayMode();
     public static bool AutoHideUnavailable { get; private set; } = LoadAutoHideUnavailable();
     /// <summary>
     /// Opt-in: the active provider's tile only stays on the taskbar while that provider's app is the
@@ -296,6 +309,16 @@ public static class WidgetSettingsService
         CurrentPercentageMode = mode;
         Save(PercentageDisplayModePath, (int)mode);
         PercentageModeChanged?.Invoke(null, EventArgs.Empty);
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    public static void Apply(ResetDisplayMode mode)
+    {
+        if (CurrentResetDisplayMode == mode)
+            return;
+
+        CurrentResetDisplayMode = mode;
+        Save(ResetDisplayModePath, (int)mode);
         Changed?.Invoke(null, EventArgs.Empty);
     }
 
@@ -786,6 +809,25 @@ public static class WidgetSettingsService
         catch
         {
             return PercentageDisplayMode.Consumed;
+        }
+    }
+
+    private static ResetDisplayMode LoadResetDisplayMode()
+    {
+        try
+        {
+            if (!File.Exists(ResetDisplayModePath))
+                return ResetDisplayMode.Countdown;
+
+            string raw = File.ReadAllText(ResetDisplayModePath);
+            return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+                && Enum.IsDefined(typeof(ResetDisplayMode), value)
+                ? (ResetDisplayMode)value
+                : ResetDisplayMode.Countdown;
+        }
+        catch
+        {
+            return ResetDisplayMode.Countdown;
         }
     }
 

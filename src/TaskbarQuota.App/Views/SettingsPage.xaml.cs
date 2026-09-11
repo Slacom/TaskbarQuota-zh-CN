@@ -72,6 +72,7 @@ namespace TaskbarQuota.Views
                 _ => 0,
             };
             PercentageModeCombo.SelectedIndex = WidgetSettingsService.CurrentPercentageMode == PercentageDisplayMode.Remaining ? 1 : 0;
+            ResetDisplayModeCombo.SelectedIndex = WidgetSettingsService.CurrentResetDisplayMode == ResetDisplayMode.AbsoluteTime ? 1 : 0;
             StartupToggle.IsOn = StartupSettingsService.IsEnabled;
             ApplyQuotaAlertSettingsToControls();
             AutoHideUnavailableToggle.IsOn = WidgetSettingsService.AutoHideUnavailable;
@@ -619,6 +620,17 @@ namespace TaskbarQuota.Views
                 var mode = tag == "Remaining"
                     ? PercentageDisplayMode.Remaining
                     : PercentageDisplayMode.Consumed;
+                WidgetSettingsService.Apply(mode);
+            }
+        }
+
+        private void OnResetDisplayModeChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ResetDisplayModeCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+            {
+                var mode = tag == "AbsoluteTime"
+                    ? ResetDisplayMode.AbsoluteTime
+                    : ResetDisplayMode.Countdown;
                 WidgetSettingsService.Apply(mode);
             }
         }

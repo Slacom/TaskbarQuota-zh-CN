@@ -64,6 +64,21 @@
                 </ComboBox>
             </tk:SettingsCard>
 
+            <tk:SettingsCard Header="{loc:Zh Text='Reset and expiry time display'}"
+                             Description="选择任务栏与悬浮窗中额度重置及可用重置过期时间显示为剩余倒计时，还是具体时钟/日期。">
+                <tk:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE823;"/>
+                </tk:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="ResetDisplayModeCombo"
+                          SelectionChanged="OnResetDisplayModeChanged"
+                          MinWidth="160"
+                          AutomationProperties.Name="{loc:Zh Text='Reset and expiry time display'}"
+                          AutomationProperties.AutomationId="ResetDisplayModeCombo">
+                    <ComboBoxItem Content="{loc:Zh Text=Countdown}" Tag="Countdown"/>
+                    <ComboBoxItem Content="{loc:Zh Text='Absolute time'}" Tag="AbsoluteTime"/>
+                </ComboBox>
+            </tk:SettingsCard>
+
             <tk:SettingsCard Header="{loc:Zh Text='Hide widget when no AI app is focused'}"
                              Description="切换到浏览器或其他应用时淡出当前服务；返回 AI 应用时恢复。已固定的服务始终保持显示。">
                 <tk:SettingsCard.HeaderIcon>
