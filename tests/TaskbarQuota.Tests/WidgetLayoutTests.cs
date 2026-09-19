@@ -14,6 +14,10 @@ public sealed class WidgetLayoutTests
         => Assert.Equal(17, WidgetSummary.WidgetTextLineHeight);
 
     [Fact]
+    public void QuotaBars_UseSmallDownwardVisualOffset()
+        => Assert.Equal(1d, WidgetSummary.WidgetBarVerticalOffset);
+
+    [Fact]
     public void BarsAndPercentages_MixedGroup_UsesValueAndResetColumnsAfterBar()
     {
         Assert.Equal(
