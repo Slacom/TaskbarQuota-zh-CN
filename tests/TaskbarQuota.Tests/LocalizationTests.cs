@@ -135,32 +135,41 @@ public sealed class LocalizationTests
     }
 
     [Fact]
-    public void FormatWidgetAbsoluteReset_WeeklySameLocalDay_ShowsDayAndHour()
+    public void FormatWidgetAbsoluteReset_WeeklyWithinTwentyHours_ShowsLocalClockTime()
     {
-        var localNow = DateTimeOffset.Now;
-        var resetAt = new DateTimeOffset(localNow.Date.AddHours(18), localNow.Offset);
+        var localNow = new DateTimeOffset(2026, 10, 4, 9, 0, 0, TimeSpan.FromHours(8));
+        var resetAt = new DateTimeOffset(localNow.Date.AddHours(18).AddMinutes(21), localNow.Offset);
 
-        Assert.Equal($"{localNow.Day}日18时", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080));
+        Assert.Equal("18时21分", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080, now: localNow));
     }
 
     [Fact]
-    public void FormatWidgetAbsoluteReset_WeeklyOtherDay_ShowsMonthAndDay()
+    public void FormatWidgetAbsoluteReset_WeeklyWithinTwentyHours_OnNextLocalDay_ShowsLocalClockTime()
     {
-        var localNow = DateTimeOffset.Now;
-        var resetAt = new DateTimeOffset(localNow.Date.AddDays(4).AddHours(9), localNow.Offset);
+        var localNow = new DateTimeOffset(2026, 10, 4, 12, 0, 0, TimeSpan.FromHours(8));
+        var resetAt = localNow.AddHours(20);
+
+        Assert.Equal("8时00分", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080, now: localNow));
+    }
+
+    [Fact]
+    public void FormatWidgetAbsoluteReset_WeeklyBeyondTwentyHours_ShowsMonthAndDay()
+    {
+        var localNow = new DateTimeOffset(2026, 10, 4, 9, 0, 0, TimeSpan.FromHours(8));
+        var resetAt = localNow.AddHours(20).AddMinutes(1);
 
         var expected = $"{resetAt.Month:D2}月{resetAt.Day:D2}日";
-        Assert.Equal(expected, UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080));
+        Assert.Equal(expected, UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080, now: localNow));
     }
 
     [Fact]
     public void FormatWidgetAbsoluteReset_UnknownWindowMinutes_UsesWeeklyStyle()
     {
-        var localNow = DateTimeOffset.Now;
+        var localNow = new DateTimeOffset(2026, 10, 4, 9, 0, 0, TimeSpan.FromHours(8));
         var resetAt = new DateTimeOffset(localNow.Date.AddDays(2).AddHours(1), localNow.Offset);
 
         var expected = $"{resetAt.Month:D2}月{resetAt.Day:D2}日";
-        Assert.Equal(expected, UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: null));
+        Assert.Equal(expected, UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: null, now: localNow));
     }
 
     [Fact]
