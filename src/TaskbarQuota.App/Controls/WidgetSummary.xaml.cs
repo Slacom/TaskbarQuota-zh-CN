@@ -33,6 +33,7 @@ namespace TaskbarQuota.Controls
         private const int WidgetFontSize = 11;
         internal const string WidgetFontFamilyName = "Microsoft YaHei";
         internal const int WidgetTextLineHeight = 17;
+        internal const double WidgetBarVerticalOffset = 1d;
         private const int BarHeight = 6;
         private const int SingleRowBarHeight = 8;
         private const int BarWidthBarsOnly = 54;
@@ -1543,6 +1544,7 @@ namespace TaskbarQuota.Controls
                 Height = isSingleRowGroup ? SingleRowBarHeight : BarHeight,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
+                RenderTransform = new TranslateTransform { Y = WidgetBarVerticalOffset },
             };
             barHost.Children.Add(track);
             barHost.Children.Add(bar);
