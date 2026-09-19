@@ -10,6 +10,10 @@ public sealed class WidgetLayoutTests
         => Assert.Equal("Microsoft YaHei", WidgetSummary.WidgetFontFamilyName);
 
     [Fact]
+    public void WidgetText_UsesFixedLineHeightForSharedBaseline()
+        => Assert.Equal(17, WidgetSummary.WidgetTextLineHeight);
+
+    [Fact]
     public void BarsAndPercentages_MixedGroup_UsesValueAndResetColumnsAfterBar()
     {
         Assert.Equal(
