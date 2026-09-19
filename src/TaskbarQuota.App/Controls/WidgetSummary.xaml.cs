@@ -32,6 +32,7 @@ namespace TaskbarQuota.Controls
         private const int CompactValueColumnWidth = 16;
         private const int WidgetFontSize = 11;
         internal const string WidgetFontFamilyName = "Microsoft YaHei";
+        internal const int WidgetTextLineHeight = 17;
         private const int BarHeight = 6;
         private const int SingleRowBarHeight = 8;
         private const int BarWidthBarsOnly = 54;
@@ -1648,6 +1649,8 @@ namespace TaskbarQuota.Controls
         {
             Text = text,
             FontFamily = new FontFamily(WidgetFontFamilyName),
+            LineHeight = WidgetTextLineHeight,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             FontSize = fontSize,
             FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             Opacity = opacity,
