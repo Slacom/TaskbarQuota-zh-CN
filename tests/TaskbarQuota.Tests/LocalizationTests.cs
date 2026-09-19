@@ -149,7 +149,7 @@ public sealed class LocalizationTests
         var localNow = new DateTimeOffset(2026, 10, 4, 12, 0, 0, TimeSpan.FromHours(8));
         var resetAt = localNow.AddHours(20);
 
-        Assert.Equal("8时00分", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080, now: localNow));
+        Assert.Equal("08时00分", UiText.FormatWidgetAbsoluteReset(resetAt, windowMinutes: 10080, now: localNow));
     }
 
     [Fact]
