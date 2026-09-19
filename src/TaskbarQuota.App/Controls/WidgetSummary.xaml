@@ -30,7 +30,7 @@
                         <Path x:Name="BadgeGlyph"/>
                     </Canvas>
                 </Viewbox>
-                <TextBlock x:Name="BadgeText" Text="?" FontSize="15" FontWeight="SemiBold"
+                <TextBlock x:Name="BadgeText" Text="?" FontFamily="Microsoft YaHei" FontSize="15" FontWeight="SemiBold"
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
                 <!-- Synara host mark: shown bottom-right over the inner provider glyph when the active

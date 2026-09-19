@@ -38,6 +38,7 @@
             </Button>
             <TextBlock x:Name="AgentPositionText"
                        Grid.Row="1"
+                       FontFamily="Microsoft YaHei"
                        FontSize="9"
                        TextAlignment="Center"
                        HorizontalAlignment="Center"
@@ -87,9 +88,11 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="TitleText" Grid.Row="0" HorizontalAlignment="Stretch"
+                           FontFamily="Microsoft YaHei"
                            FontSize="12" FontWeight="SemiBold" TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="StepText" Grid.Row="1" HorizontalAlignment="Stretch"
+                           FontFamily="Microsoft YaHei"
                            FontSize="11" Opacity="0.72" TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"/>
             </Grid>

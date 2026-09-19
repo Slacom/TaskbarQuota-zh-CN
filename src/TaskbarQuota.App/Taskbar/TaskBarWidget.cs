@@ -792,6 +792,7 @@ namespace TaskbarQuota.Taskbar
         {
             Text = "|",
             Width = TileSeparatorLogicalPx,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(WidgetSummary.WidgetFontFamilyName),
             FontSize = 12,
             Opacity = 0.35,
             TextAlignment = Microsoft.UI.Xaml.TextAlignment.Center,

@@ -166,6 +166,7 @@ public sealed partial class QuotaWidgetContent : UserControl
     {
         Text = "|",
         Width = TileSeparatorLogicalPx,
+        FontFamily = new FontFamily(WidgetSummary.WidgetFontFamilyName),
         FontSize = 12,
         Opacity = 0.35,
         TextAlignment = TextAlignment.Center,

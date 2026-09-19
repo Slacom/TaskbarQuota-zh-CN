@@ -31,6 +31,7 @@ namespace TaskbarQuota.Controls
         private const int ValueColumnWidth = 34;
         private const int CompactValueColumnWidth = 16;
         private const int WidgetFontSize = 11;
+        internal const string WidgetFontFamilyName = "Microsoft YaHei";
         private const int BarHeight = 6;
         private const int SingleRowBarHeight = 8;
         private const int BarWidthBarsOnly = 54;
@@ -1646,7 +1647,7 @@ namespace TaskbarQuota.Controls
         private static TextBlock CreateText(string text, double opacity, TextAlignment alignment, int fontSize = WidgetFontSize) => new()
         {
             Text = text,
-            FontFamily = new FontFamily("Segoe UI Variable Text"),
+            FontFamily = new FontFamily(WidgetFontFamilyName),
             FontSize = fontSize,
             FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             Opacity = opacity,
@@ -1678,7 +1679,7 @@ namespace TaskbarQuota.Controls
                 return CreateText("", 0.9, TextAlignment.Left, fontSize);
 
             var reset = CreateText($"({resetLabel})", 0.9, TextAlignment.Left, fontSize);
-            reset.FontFamily = new FontFamily("Segoe UI Variable Text");
+            reset.FontFamily = new FontFamily(WidgetFontFamilyName);
             reset.Foreground = ResetBrush(row.ResetDescription ?? "");
             reset.TextTrimming = TextTrimming.None;
             return reset;
@@ -1867,7 +1868,7 @@ namespace TaskbarQuota.Controls
             var textBlock = new TextBlock
             {
                 Text = text,
-                FontFamily = new FontFamily("Segoe UI Variable Text"),
+                FontFamily = new FontFamily(WidgetFontFamilyName),
                 FontSize = fontSize,
                 FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             };
@@ -1882,7 +1883,7 @@ namespace TaskbarQuota.Controls
             var textBlock = new TextBlock
             {
                 Text = text,
-                FontFamily = new FontFamily("Segoe UI Variable Text"),
+                FontFamily = new FontFamily(WidgetFontFamilyName),
                 FontSize = fontSize,
                 FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             };
