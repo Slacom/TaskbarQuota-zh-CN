@@ -239,11 +239,11 @@ internal static partial class UiText
         var localNow = now.ToLocalTime();
         bool isLongWindow = windowMinutes is null or >= 1440;
         if (!isLongWindow)
-            return local.ToString("H时mm分", CultureInfo.InvariantCulture);
+            return local.ToString("HH时mm分", CultureInfo.InvariantCulture);
 
         var untilReset = local - localNow;
         if (untilReset >= TimeSpan.Zero && untilReset <= WeeklyAbsoluteTimeThreshold)
-            return local.ToString("H时mm分", CultureInfo.InvariantCulture);
+            return local.ToString("HH时mm分", CultureInfo.InvariantCulture);
 
         if (local.Date == localNow.Date)
             return $"{local.Day}日{local.Hour:D2}时";
