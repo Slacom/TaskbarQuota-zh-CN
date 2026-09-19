@@ -6,6 +6,10 @@ namespace TaskbarQuota.Tests;
 public sealed class WidgetLayoutTests
 {
     [Fact]
+    public void WidgetText_UsesMicrosoftYaHeiFont()
+        => Assert.Equal("Microsoft YaHei", WidgetSummary.WidgetFontFamilyName);
+
+    [Fact]
     public void BarsAndPercentages_MixedGroup_UsesValueAndResetColumnsAfterBar()
     {
         Assert.Equal(
