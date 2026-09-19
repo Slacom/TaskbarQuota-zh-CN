@@ -11,6 +11,8 @@ namespace TaskbarQuota.Localization;
 /// </summary>
 internal static partial class UiText
 {
+    private static readonly TimeSpan WeeklyAbsoluteTimeThreshold = TimeSpan.FromHours(20);
+
     private static readonly IReadOnlyDictionary<string, string> Values =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -217,21 +219,33 @@ internal static partial class UiText
 
     /// <summary>
     /// Compact absolute reset label for the taskbar/floating widget, Codex-desktop style:
-    /// session windows show local clock time (18:21); weekly windows show a calendar date
-    /// (9月15日), or day+hour (15日18时) when the reset lands on the current local day.
+    /// session windows show local clock time (18:21); weekly windows show local clock time when
+    /// the next reset is within 20 hours, otherwise a calendar date (9月15日), or day+hour
+    /// (15日18时) for a reset that lands on the current local day.
     /// Returns empty when no absolute timestamp is available.
     /// </summary>
     public static string FormatWidgetAbsoluteReset(DateTimeOffset? resetAt, int? windowMinutes)
+        => FormatWidgetAbsoluteReset(resetAt, windowMinutes, DateTimeOffset.Now);
+
+    internal static string FormatWidgetAbsoluteReset(
+        DateTimeOffset? resetAt,
+        int? windowMinutes,
+        DateTimeOffset now)
     {
         if (resetAt is not DateTimeOffset at)
             return string.Empty;
 
         var local = at.ToLocalTime();
+        var localNow = now.ToLocalTime();
         bool isLongWindow = windowMinutes is null or >= 1440;
         if (!isLongWindow)
             return local.ToString("H时mm分", CultureInfo.InvariantCulture);
 
-        if (local.Date == DateTimeOffset.Now.Date)
+        var untilReset = local - localNow;
+        if (untilReset >= TimeSpan.Zero && untilReset <= WeeklyAbsoluteTimeThreshold)
+            return local.ToString("H时mm分", CultureInfo.InvariantCulture);
+
+        if (local.Date == localNow.Date)
             return $"{local.Day}日{local.Hour:D2}时";
 
         return local.ToString("MM月dd日", CultureInfo.InvariantCulture);
