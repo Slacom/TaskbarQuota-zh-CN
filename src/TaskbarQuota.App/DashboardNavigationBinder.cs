@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Specialized;
-using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -89,34 +88,6 @@ namespace TaskbarQuota
             IsSyncing = true;
             SyncSelection();
             IsSyncing = false;
-        }
-
-        /// <summary>
-        /// Returns providers whose dashboard setting is on. When unavailable providers are hidden, only
-        /// providers with a loaded dashboard card remain; otherwise the complete registered provider list
-        /// is used so a fresh user does not have to wait for discovery or quota fetching before seeing the
-        /// provider navigation entries.
-        /// </summary>
-        internal static IReadOnlyList<ProviderId> ComputeNavigationProviderIds(
-            IReadOnlyList<ProviderId> allProviders,
-            IReadOnlySet<ProviderId> dashboardProviders,
-            IReadOnlySet<ProviderId> availableProviders,
-            Func<ProviderId, bool> isDashboardVisible,
-            bool hideUnavailable)
-        {
-            var result = new List<ProviderId>(allProviders.Count);
-            foreach (var id in allProviders)
-            {
-                if (!isDashboardVisible(id))
-                    continue;
-
-                if (!hideUnavailable || dashboardProviders.Contains(id))
-                {
-                    result.Add(id);
-                }
-            }
-
-            return result;
         }
 
         public bool SelectFromNavigation(NavigationViewSelectionChangedEventArgs args)

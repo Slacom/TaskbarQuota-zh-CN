@@ -18,28 +18,6 @@ public sealed class WidgetLayoutTests
         => Assert.Equal(1d, WidgetSummary.WidgetBarVerticalOffset);
 
     [Fact]
-    public void BarsAndPercentages_MixedGroup_UsesValueAndResetColumnsAfterBar()
-    {
-        Assert.Equal(
-            (ValueOffset: 2, ResetOffset: 3),
-            WidgetSummary.GetRowColumnOffsetsForTesting(
-                WidgetDisplayMode.BarsAndPercentages,
-                groupHasBar: true,
-                rowHasBar: false));
-    }
-
-    [Fact]
-    public void BarsAndPercentages_NoBarGroup_UsesThreeMeaningfulColumns()
-    {
-        Assert.Equal(
-            (ValueOffset: 1, ResetOffset: 2),
-            WidgetSummary.GetRowColumnOffsetsForTesting(
-                WidgetDisplayMode.BarsAndPercentages,
-                groupHasBar: false,
-                rowHasBar: false));
-    }
-
-    [Fact]
     public void ResetColumnWidth_DoesNotReserveSpaceWithoutResetText()
         => Assert.Equal(0, WidgetSummary.GetResetColumnWidthForTesting(0));
 

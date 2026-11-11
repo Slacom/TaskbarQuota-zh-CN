@@ -334,33 +334,6 @@ public class PinBudgetServiceTests
     }
 
     [Fact]
-    public void BudgetHysteresisRequiresThreeConsecutiveOverBudgetEvaluations()
-    {
-        var state = default(BudgetHysteresisState);
-
-        state = PinBudgetService.AdvanceBudgetHysteresis(state, "same-set", overBudget: true);
-        Assert.False(PinBudgetService.IsBudgetEvictionDue(state));
-
-        state = PinBudgetService.AdvanceBudgetHysteresis(state, "same-set", overBudget: true);
-        Assert.False(PinBudgetService.IsBudgetEvictionDue(state));
-
-        state = PinBudgetService.AdvanceBudgetHysteresis(state, "same-set", overBudget: true);
-        Assert.True(PinBudgetService.IsBudgetEvictionDue(state));
-    }
-
-    [Fact]
-    public void BudgetHysteresisResetsWhenTheConditionFitsOrTheSignatureChanges()
-    {
-        var state = new BudgetHysteresisState("same-set", 2);
-
-        state = PinBudgetService.AdvanceBudgetHysteresis(state, "same-set", overBudget: false);
-        Assert.Equal(default, state);
-
-        state = PinBudgetService.AdvanceBudgetHysteresis(state, "new-set", overBudget: true);
-        Assert.Equal(1, state.ConsecutiveOverBudget);
-    }
-
-    [Fact]
     public void AvailableWidthIsTrackedIndependentlyForEachDisplay()
     {
         TaskbarSpace.ResetAvailableWidth();

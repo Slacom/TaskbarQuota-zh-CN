@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using TaskbarQuota.Controls;
 using TaskbarQuota.Taskbar;
 using TaskbarQuota.Usage;
@@ -15,28 +14,20 @@ internal readonly record struct PinBudgetDisplay(
     IReadOnlyList<ProviderId> Providers,
     int FitMargin = 0);
 
-/// <summary>State carried between budget evaluations so transient geometry does not evict a pin.</summary>
-internal readonly record struct BudgetHysteresisState(
-    string? Signature,
-    int ConsecutiveOverBudget);
-
 /// <summary>
 /// Decides whether a provider can be pinned, by the only measure that matters: whether the tile set fits the
 /// free space each taskbar display actually has.
 ///
-    /// A pinned tile is never trimmed or reduced — it renders exactly the rows the user configured — so a set
-    /// that does not fit is held back by the widget until space is available. The persisted pin preference is
-    /// never changed by a measurement or refresh. There is deliberately no second, abstract allowance on top
-    /// of this. An earlier weight budget (a provider costing one or two
+/// A pinned tile is never trimmed or reduced — it renders exactly the rows the user configured — so a set
+/// that does not fit is held back by the widget until space is available. The persisted pin preference is
+/// never changed by a measurement or refresh. There is deliberately no second, abstract allowance on top
+/// of this. An earlier weight budget (a provider costing one or two
 /// "slots" out of five) both duplicated this check and contradicted it: three three-row providers come to
 /// 1241px, which fits a left-aligned taskbar comfortably, yet cost six slots and were refused. Measured
 /// space is the rule; anything else is a guess that eventually says no to something that plainly works.
 /// </summary>
 public static class PinBudgetService
 {
-    /// <summary>Number of consecutive over-budget evaluations retained in legacy diagnostics.</summary>
-    internal const int BudgetHysteresisEvaluationCount = 3;
-
     /// <summary>
     /// Free width the pin budget uses for the current surface. Floating mode is constrained only by the
     /// tile cap; its host scrolls horizontally when content is wider than the monitor work area.
@@ -244,14 +235,9 @@ public static class PinBudgetService
     /// preference. The widget applies the returned policy in memory and shows the tile again when space
     /// returns.
     /// </summary>
-    /// <param name="notify">
-    /// The parameter is retained for source compatibility with callers from earlier releases; budget checks
-    /// no longer raise a second settings notification because they never mutate settings.
-    /// </param>
-    public static IReadOnlyList<ProviderId> EnforceBudget(bool notify = true)
+    public static IReadOnlyList<ProviderId> EnforceBudget()
     {
         var pinned = PinnedProviders();
-        _ = notify;
         if (pinned.Count == 0)
             return Array.Empty<ProviderId>();
 
@@ -285,24 +271,6 @@ public static class PinBudgetService
 
         return dropped;
     }
-
-    /// <summary>Advances hysteresis state; pure so consecutive-evaluation behavior can be tested directly.</summary>
-    internal static BudgetHysteresisState AdvanceBudgetHysteresis(
-        BudgetHysteresisState previous,
-        string signature,
-        bool overBudget)
-    {
-        if (!overBudget)
-            return default;
-
-        int consecutive = string.Equals(previous.Signature, signature, StringComparison.Ordinal)
-            ? previous.ConsecutiveOverBudget + 1
-            : 1;
-        return new BudgetHysteresisState(signature, consecutive);
-    }
-
-    internal static bool IsBudgetEvictionDue(BudgetHysteresisState state)
-        => state.ConsecutiveOverBudget >= BudgetHysteresisEvaluationCount;
 
     /// <summary>
     /// Which pinned providers to drop so the rest fit every routed display and the tile cap. Pure so the
@@ -514,47 +482,6 @@ public static class PinBudgetService
         }
 
         return displays;
-    }
-
-    private static string BudgetSignature(
-        IReadOnlyList<ProviderId> providers,
-        IReadOnlyList<PinBudgetDisplay> displays,
-        IReadOnlyList<ProviderId> recent)
-    {
-        var builder = new StringBuilder(256);
-        builder.Append((int)WidgetSettingsService.CurrentSurface).Append('|')
-            .Append((int)WidgetSettingsService.CurrentTaskbarPlacement).Append('|')
-            .Append(WidgetSettingsService.SelectedTaskbarDisplayKey).Append('|')
-            .Append(UsageCoordinator.MaxDisplayedWidgetTiles);
-
-        foreach (var provider in providers.OrderBy(provider => provider))
-        {
-            int recentIndex = int.MaxValue;
-            for (int i = 0; i < recent.Count; i++)
-            {
-                if (recent[i] == provider)
-                {
-                    recentIndex = i;
-                    break;
-                }
-            }
-
-            builder.Append("|p:").Append(provider)
-                .Append(':').Append(WidgetSettingsService.GetPinnedProviderDisplay(provider) ?? string.Empty)
-                .Append(':').Append(WidgetSettingsService.GetAdaptiveProviderDisplay(provider) ?? string.Empty)
-                .Append(':').Append(TileWidth(provider))
-                .Append(':').Append(recentIndex);
-        }
-
-        foreach (var display in displays.OrderBy(display => display.DisplayKey, StringComparer.OrdinalIgnoreCase))
-        {
-            builder.Append("|d:").Append(display.DisplayKey)
-                .Append(':').Append(display.AvailableWidth)
-                .Append(':').Append(display.FitMargin)
-                .Append(':').Append(string.Join(',', display.Providers));
-        }
-
-        return builder.ToString();
     }
 
     private static string DescribeCalculations(

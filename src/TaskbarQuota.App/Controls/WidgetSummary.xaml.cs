@@ -1465,23 +1465,6 @@ namespace TaskbarQuota.Controls
             return 1 + (group * columnsPerGroup);
         }
 
-        private static (int ValueOffset, int ResetOffset) GetRowColumnOffsets(
-            WidgetDisplayMode mode,
-            bool groupHasBar,
-            bool rowHasBar)
-        {
-            if (mode == WidgetDisplayMode.BarsAndPercentages && (groupHasBar || rowHasBar))
-                return (2, 3);
-
-            return (1, 2);
-        }
-
-        internal static (int ValueOffset, int ResetOffset) GetRowColumnOffsetsForTesting(
-            WidgetDisplayMode mode,
-            bool groupHasBar,
-            bool rowHasBar)
-            => GetRowColumnOffsets(mode, groupHasBar, rowHasBar);
-
         /// <summary>The rows this tile draws — everything the user enabled, or the placeholder until the
         /// first result lands. Never copies: the measure and render paths both run on every usage publish.
         /// </summary>

@@ -23,7 +23,7 @@
   #define PublishDir "..\src\TaskbarQuota.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.0"
+  #define MyAppVersion "1.4.0.0"
 #endif
 #ifndef TargetArch
   #define TargetArch "x64"

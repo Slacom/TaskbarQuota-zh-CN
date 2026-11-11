@@ -686,9 +686,8 @@ public static class WidgetSettingsService
         ShowAgentActivityInWidget = enabled;
         Save(ShowAgentActivityInWidgetPath, enabled ? 1 : 0);
         // Activity shares the taskbar area with quota tiles. Start reconciling pins against the effective
-        // two-tile cap; hysteresis delays eviction until the over-budget geometry is stable, and the active
-        // tile fills a remaining slot only after pins have been placed.
-        Services.PinBudgetService.EnforceBudget(notify: false);
+        // two-tile cap; the active tile fills a remaining slot only after pins have been placed.
+        Services.PinBudgetService.EnforceBudget();
         Changed?.Invoke(null, EventArgs.Empty);
     }
 
@@ -715,9 +714,7 @@ public static class WidgetSettingsService
         // is reconciled by eventually dropping the least recently used pin instead of refusing the change.
         //
         // Silent, because the single Changed below already covers both edits. Letting the rebalance raise
-        // its own notification meant one row toggle rebuilt the nav badges, the flyout strip and every
-        // widget tile twice.
-        Services.PinBudgetService.EnforceBudget(notify: false);
+        Services.PinBudgetService.EnforceBudget();
         Changed?.Invoke(null, EventArgs.Empty);
     }
 
