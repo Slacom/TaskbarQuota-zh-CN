@@ -15,6 +15,11 @@ public sealed class UpdateCheckerService
 {
     private const string LatestReleaseUrl = "https://api.github.com/repos/zioder/TaskbarQuota/releases/latest";
     private const string HttpUserAgent = "TaskbarQuota";
+    // One client for the process lifetime: a per-call HttpClient leaks a connection pool each time.
+    private static readonly HttpClient SharedClient = new(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    });
     private static readonly Uri StoreProductUri = new("ms-windows-store://pdp/?productid=9N3KL49VFPVN");
 
     public async Task<UpdateCheckResult> CheckAsync(string currentVersion, CancellationToken cancellationToken = default)
@@ -25,16 +30,16 @@ public sealed class UpdateCheckerService
         AppDistributionChannel distributionChannel,
         CancellationToken cancellationToken = default)
     {
-        using var client = new HttpClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(HttpUserAgent);
-        client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseUrl);
+        request.Headers.UserAgent.ParseAdd(HttpUserAgent);
+        request.Headers.Accept.ParseAdd("application/vnd.github+json");
 
-        using var response = await client.GetAsync(LatestReleaseUrl, cancellationToken);
+        using var response = await SharedClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var release = await JsonSerializer.DeserializeAsync<GitHubRelease>(stream, cancellationToken: cancellationToken)
-            ?? throw new InvalidOperationException("Could not read the latest GitHub release.");
+            ?? throw new InvalidOperationException("无法读取最新 GitHub 发布信息。");
 
         var latest = VersionComparer.Normalize(release.TagName);
         var current = VersionComparer.Normalize(currentVersion);
@@ -76,14 +81,14 @@ public sealed class UpdateCheckerService
             || string.IsNullOrWhiteSpace(result.Version)
             || result.DownloadUrl is null)
         {
-            throw new InvalidOperationException("The latest GitHub release does not include a downloadable Windows installer.");
+            throw new InvalidOperationException("最新 GitHub 发布中没有可下载的 Windows 安装包。");
         }
 
-        using var client = new HttpClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(HttpUserAgent);
+        using var request = new HttpRequestMessage(HttpMethod.Get, result.DownloadUrl);
+        request.Headers.UserAgent.ParseAdd(HttpUserAgent);
 
-        using var response = await client.GetAsync(
-            result.DownloadUrl,
+        using var response = await SharedClient.SendAsync(
+            request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         response.EnsureSuccessStatusCode();

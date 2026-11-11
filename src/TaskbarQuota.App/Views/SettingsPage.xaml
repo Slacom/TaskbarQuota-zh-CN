@@ -89,6 +89,25 @@
                               Toggled="OnHideWhenUnfocusedToggled"/>
             </tk:SettingsCard>
 
+            <tk:SettingsCard Header="{loc:Zh Text='Colored provider icons'}"
+                             Description="为用量小组件中的供应商图标着色，便于区分相似标志。智能体活动会在图标上显示状态点。关闭后所有图标使用普通主题色。">
+                <tk:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE790;"/>
+                </tk:SettingsCard.HeaderIcon>
+                <ToggleSwitch x:Name="ColoredIconsToggle"
+                              AutomationProperties.Name="{loc:Zh Text='Colored provider icons'}"
+                              AutomationProperties.AutomationId="ColoredIconsToggle"
+                              Toggled="OnColoredIconsToggled"/>
+            </tk:SettingsCard>
+
+            <tk:SettingsExpander x:Name="IconColorsExpander"
+                                 Header="{loc:Zh Text='Provider icon colors'}"
+                                 Description="为每个供应商选择用量小组件中的图标颜色。">
+                <tk:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE771;"/>
+                </tk:SettingsExpander.HeaderIcon>
+            </tk:SettingsExpander>
+
             <tk:SettingsCard Header="{loc:Zh Text='Where to show usage'}"
                              Description="任务栏模式会将紧凑小组件放在托盘旁；悬浮模式使用相同布局的原生亚克力置顶窗口。滚轮可调节透明强度，右键可返回任务栏模式。">
                 <tk:SettingsCard.HeaderIcon>
@@ -136,9 +155,80 @@
                 </StackPanel>
             </tk:SettingsCard>
 
+            <tk:SettingsCard x:Name="FloatingWindowOpacityCard"
+                             Header="{loc:Zh Text='Floating window opacity'}"
+                             Description="调整整个悬浮窗口的透明度，包括文字、图标和进度条，以便看清后方应用。也可在悬浮窗上按 Ctrl + 滚轮调节。">
+                <tk:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE7B3;"/>
+                </tk:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Grid x:Name="FloatingWindowOpacitySliderHost"
+                          Width="180"
+                          VerticalAlignment="Center"
+                          AutomationProperties.Name="{loc:Zh Text='Floating window opacity'}"/>
+                    <TextBlock x:Name="FloatingWindowOpacityLabel"
+                               VerticalAlignment="Center"
+                               MinWidth="40"
+                               Style="{StaticResource BodyTextBlockStyle}"/>
+                </StackPanel>
+            </tk:SettingsCard>
+
+            <tk:SettingsCard x:Name="FloatingClickThroughCard"
+                             Header="{loc:Zh Text='Floating window click-through'}"
+                             Description="允许鼠标点击穿过悬浮窗口，作用于后方应用。按住 Ctrl 可点击、拖动或滚动该窗口。也可从托盘菜单切换。">
+                <tk:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8B0;"/>
+                </tk:SettingsCard.HeaderIcon>
+                <ToggleSwitch x:Name="FloatingClickThroughToggle"
+                              AutomationProperties.Name="{loc:Zh Text='Floating window click-through'}"
+                              AutomationProperties.AutomationId="FloatingClickThroughToggle"
+                              Toggled="OnFloatingClickThroughToggled"/>
+            </tk:SettingsCard>
+
+            <TextBlock Text="{loc:Zh Text='Taskbar display order'}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
+            <TextBlock Text="拖动供应商可设置其在任务栏中从左到右的显示顺序。这里只列出已启用小组件的供应商；更改会立即生效，并在切换应用后保持。"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Opacity="0.7" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="8">
+                <StackPanel Spacing="8">
+                    <ListView x:Name="ProviderOrderList"
+                              CanDragItems="True" CanReorderItems="True" AllowDrop="True"
+                              SelectionMode="Single" MaxHeight="360"
+                              HorizontalContentAlignment="Stretch"
+                              AutomationProperties.Name="{loc:Zh Text='Taskbar provider display order'}"
+                              AutomationProperties.AutomationId="ProviderOrderList"
+                              DragItemsStarting="OnProviderOrderDragStarting"
+                              DragItemsCompleted="OnProviderOrderDragCompleted"
+                              SelectionChanged="OnProviderOrderSelectionChanged">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ProviderSettingItemViewModel">
+                                <StackPanel Orientation="Horizontal" Spacing="12" Padding="8">
+                                    <FontIcon Glyph="&#xE700;" FontSize="14" Opacity="0.6"
+                                              IsHitTestVisible="False"/>
+                                    <TextBlock Text="{x:Bind DisplayName}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <TextBlock x:Name="ProviderOrderEmptyText"
+                               Text="请在下方启用供应商的“小组件”开关，将其添加到这里。"
+                               TextWrapping="Wrap" Margin="8"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="ProviderOrderUpButton" Content="{loc:Zh Text='Move up'}"
+                                AutomationProperties.Name="将选中的供应商前移"
+                                Click="OnProviderOrderMoveUp" IsEnabled="False"/>
+                        <Button x:Name="ProviderOrderDownButton" Content="{loc:Zh Text='Move down'}"
+                                AutomationProperties.Name="将选中的供应商后移"
+                                Click="OnProviderOrderMoveDown" IsEnabled="False"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="{loc:Zh Text=Providers}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
             <tk:SettingsCard Header="{loc:Zh Text='Hide unavailable providers'}"
-                             Description="自动隐藏明确报告为尚未安装的服务；需要登录或等待应用启动的服务会保留，以便修复。">
+                             Description="自动隐藏未安装或未登录的供应商。仍可从仪表板或下方重新启用。">
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7B8;"/>
                 </tk:SettingsCard.HeaderIcon>
@@ -160,9 +250,14 @@
                 <tk:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7F4;"/>
                 </tk:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="StartupToggle"
-                              AutomationProperties.Name="{loc:Zh Text='Open at startup'}"
-                              Toggled="OnStartupToggled"/>
+                <StackPanel Spacing="8">
+                    <ToggleSwitch x:Name="StartupToggle"
+                                  AutomationProperties.Name="{loc:Zh Text='Open at startup'}"
+                                  Toggled="OnStartupToggled"/>
+                    <TextBlock x:Name="StartupHelpText"
+                               Visibility="Collapsed"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
             </tk:SettingsCard>
 
             <TextBlock Text="{loc:Zh Text=Notifications}" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,2"/>
@@ -193,6 +288,14 @@
                 <ToggleSwitch x:Name="CrossSessionReplenishmentToggle"
                               AutomationProperties.Name="{loc:Zh Text='Notify about quota increases since the last session'}"
                               Toggled="OnCrossSessionReplenishmentToggled"/>
+            </tk:SettingsCard>
+
+            <tk:SettingsCard Header="{loc:Zh Text='Muted providers'}"
+                             Description="不显示所选供应商的阈值提醒和额度恢复通知。">
+                <tk:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8D4;"/>
+                </tk:SettingsCard.HeaderIcon>
+                <StackPanel x:Name="MutedProvidersPanel" Spacing="4"/>
             </tk:SettingsCard>
 
             <tk:SettingsCard Header="{loc:Zh Text='Warning threshold'}" Description="当某个用量周期的已用百分比达到此值时通知。">

@@ -26,6 +26,12 @@ namespace TaskbarQuota.Usage
 
         private static readonly object CacheLock = new();
         private static readonly Dictionary<ProviderId, HistoryCacheEntry> Cache = new();
+
+        internal readonly record struct FileVersion(long Length, long WriteTicks, long WalLength, long WalWriteTicks);
+
+        private sealed record FileEventsEntry(DateTime LocalDay, FileVersion Version, UsageEvent[] Events);
+
+        private static readonly Dictionary<(ProviderId Provider, string Path), FileEventsEntry> FileEvents = new();
         private static readonly Dictionary<ProviderId, object> ProviderLocks =
             Enum.GetValues<ProviderId>().ToDictionary(id => id, _ => new object());
 
@@ -48,6 +54,7 @@ namespace TaskbarQuota.Usage
             var files = DiscoverFiles(providerId).ToArray();
             if (files.Length == 0)
             {
+                PruneFileEvents(providerId, files);
                 history = new UsageHistory();
                 return false;
             }
@@ -68,12 +75,13 @@ namespace TaskbarQuota.Usage
             }
 
             var now = DateTimeOffset.Now;
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
             var events = new List<UsageEvent>();
             foreach (var file in files)
             {
                 try
                 {
-                    events.AddRange(ParseFile(providerId, file, now));
+                    events.AddRange(ParseFileCached(providerId, file, now));
                 }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
@@ -81,13 +89,81 @@ namespace TaskbarQuota.Usage
                 catch (SqliteException) { }
                 catch (InvalidOperationException) { }
             }
+            PruneFileEvents(providerId, files);
 
-            history = Aggregate(events, now, SourceNote(providerId), providerId);
+            history = Aggregate(DropSupersededEvents(providerId, events), now, SourceNote(providerId), providerId);
             var loaded = history.Last90Days is not null;
             lock (CacheLock)
                 Cache[providerId] = new HistoryCacheEntry(DateTime.Today, fingerprint.FileCount, fingerprint.TotalLength, fingerprint.LatestWriteTicks, fingerprint.PathHash, history);
-            Log.Information($"[history] provider={providerId} files={files.Length} events={events.Count} today={history.Today?.Tokens ?? 0} last90={history.Last90Days?.Tokens ?? 0} loaded={loaded}");
+            Log.Information($"[history] provider={providerId} files={files.Length} events={events.Count} today={history.Today?.Tokens ?? 0} last90={history.Last90Days?.Tokens ?? 0} loaded={loaded} elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
             return loaded;
+        }
+
+        private static UsageEvent[] ParseFileCached(ProviderId providerId, string path, DateTimeOffset now)
+        {
+            // Codex and OpenCode Go read the same session logs, so both share one unfiltered parse.
+            bool codexLog = providerId is ProviderId.Codex or ProviderId.OpenCodeGo
+                && Path.GetExtension(path).Equals(".jsonl", StringComparison.OrdinalIgnoreCase);
+            var events = ReadFileEventsCached(codexLog ? ProviderId.Codex : providerId, path, now, codexLog);
+            if (!codexLog)
+                return events;
+
+            bool openCodeGo = providerId == ProviderId.OpenCodeGo;
+            return events.Where(item => IsOpenCodeGoModel(item.Model) == openCodeGo).ToArray();
+        }
+
+        private static UsageEvent[] ReadFileEventsCached(ProviderId cacheProvider, string path, DateTimeOffset now, bool codexLog)
+        {
+            var version = ReadFileVersion(path);
+            var key = (cacheProvider, path);
+            lock (CacheLock)
+            {
+                if (FileEvents.TryGetValue(key, out var cached)
+                    && cached.LocalDay == DateTime.Today
+                    && cached.Version == version)
+                {
+                    return cached.Events;
+                }
+            }
+
+            var events = codexLog
+                ? ParseCodex(ReadSharedLines(path)).ToArray()
+                : ParseFile(cacheProvider, path, now).ToArray();
+            lock (CacheLock)
+                FileEvents[key] = new FileEventsEntry(DateTime.Today, version, events);
+            return events;
+        }
+
+        internal static FileVersion ReadFileVersion(string path)
+        {
+            var info = new FileInfo(path);
+            // SQLite in WAL mode appends to the -wal companion and leaves the main file unchanged until a checkpoint.
+            var wal = new FileInfo(path + "-wal");
+            return new FileVersion(
+                info.Length,
+                info.LastWriteTimeUtc.Ticks,
+                wal.Exists ? wal.Length : 0,
+                wal.Exists ? wal.LastWriteTimeUtc.Ticks : 0);
+        }
+
+        private static void PruneFileEvents(ProviderId providerId, IReadOnlyCollection<string> files)
+        {
+            var current = new HashSet<string>(files, StringComparer.OrdinalIgnoreCase);
+            lock (CacheLock)
+            {
+                foreach (var key in FileEvents.Keys.Where(k => k.Provider == providerId && !current.Contains(k.Path)).ToList())
+                    FileEvents.Remove(key);
+
+                // OpenCode Go parses Codex-style sessions into the shared Codex cache. It may be
+                // the only provider queried, so its file discovery must also evict deleted logs.
+                if (providerId == ProviderId.OpenCodeGo)
+                {
+                    foreach (var key in FileEvents.Keys.Where(k => k.Provider == ProviderId.Codex
+                        && Path.GetExtension(k.Path).Equals(".jsonl", StringComparison.OrdinalIgnoreCase)
+                        && !current.Contains(k.Path)).ToList())
+                        FileEvents.Remove(key);
+                }
+            }
         }
 
         private static (int FileCount, long TotalLength, long LatestWriteTicks, int PathHash) Fingerprint(IEnumerable<string> files)
@@ -127,13 +203,50 @@ namespace TaskbarQuota.Usage
             IEnumerable<string> files,
             DateTimeOffset now)
         {
-            var events = files.SelectMany(file => ParseFile(providerId, file, now));
-            return Aggregate(events, now, SourceNote(providerId), providerId);
+            var events = files.SelectMany(file => ParseFile(providerId, file, now)).ToList();
+            return Aggregate(DropSupersededEvents(providerId, events), now, SourceNote(providerId), providerId);
+        }
+
+        /// <summary>
+        /// Grok Build's per-session <c>updates.jsonl</c> reports billed usage per turn; the legacy
+        /// shell log (<c>logs/unified.jsonl</c>) recorded per-inference token counts for the same
+        /// sessions. Where a session has session-log usage, its legacy events are dropped.
+        /// </summary>
+        private static List<UsageEvent> DropSupersededEvents(ProviderId providerId, List<UsageEvent> events)
+        {
+            if (providerId != ProviderId.Grok)
+                return events;
+            var reported = events
+                .Where(item => item.DedupeKey?.StartsWith(GrokSessionKeyPrefix, StringComparison.Ordinal) == true)
+                .Select(item => item.SessionId)
+                .ToHashSet(StringComparer.Ordinal);
+            return reported.Count == 0
+                ? events
+                : events.Where(item => item.DedupeKey?.StartsWith(GrokSessionKeyPrefix, StringComparison.Ordinal) == true
+                    || !reported.Contains(item.SessionId)).ToList();
+        }
+
+        internal static UsageHistory BuildFromCursorDashboardEvents(
+            IEnumerable<CursorDashboardUsageEvent> dashboardEvents,
+            DateTimeOffset now)
+        {
+            var index = 0;
+            var events = dashboardEvents.Where(item => item.Tokens.TotalTokens > 0).Select(item => new UsageEvent(
+                item.Timestamp,
+                string.IsNullOrWhiteSpace(item.Model) ? "cursor-unknown" : item.Model,
+                item.Tokens,
+                item.ReportedCostUsd,
+                item.SessionId ?? string.Empty,
+                $"cursor-dashboard:{index++}"));
+            return Aggregate(events, now, "Cursor dashboard reported tokens and API-rate costs", ProviderId.Cursor);
         }
 
         private static IEnumerable<UsageEvent> ParseFile(ProviderId providerId, string path, DateTimeOffset now)
             => providerId switch
             {
+                ProviderId.Antigravity when Path.GetExtension(path).Equals(".db", StringComparison.OrdinalIgnoreCase)
+                    => AntigravityUsageDatabaseReader.Read(path).Select(item => new UsageEvent(
+                        item.Timestamp, item.Model, item.Tokens, null, item.SessionId, item.DedupeKey)),
                 ProviderId.OpenCode or ProviderId.OpenCodeGo when Path.GetExtension(path).Equals(".db", StringComparison.OrdinalIgnoreCase)
                     => ParseOpenCodeDatabase(path, providerId, now),
                 ProviderId.OpenCodeGo when Path.GetExtension(path).Equals(".jsonl", StringComparison.OrdinalIgnoreCase)
@@ -147,6 +260,8 @@ namespace TaskbarQuota.Usage
                     => ParseZaiDatabase(path, now),
                 ProviderId.Codex when Path.GetExtension(path).Equals(".jsonl", StringComparison.OrdinalIgnoreCase)
                     => ParseCodex(ReadSharedLines(path)).Where(item => !IsOpenCodeGoModel(item.Model)),
+                ProviderId.Grok when Path.GetFileName(path).Equals("updates.jsonl", StringComparison.OrdinalIgnoreCase)
+                    => ParseGrokSessionUpdates(ReadSharedLines(path)),
                 ProviderId.Claude or ProviderId.Grok
                     => ParseEvents(providerId, ReadSharedLines(path)),
                 _ => Array.Empty<UsageEvent>(),
@@ -166,6 +281,41 @@ namespace TaskbarQuota.Usage
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (string.IsNullOrWhiteSpace(home))
                 yield break;
+
+            if (providerId == ProviderId.Cursor)
+            {
+                // Cursor history is account-wide and comes from its authenticated dashboard API.
+                // A context-window snapshot in state.vscdb is not cumulative token usage.
+                yield break;
+            }
+
+            if (providerId == ProviderId.Antigravity)
+            {
+                var antigravitySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var root in AntigravityConversationRoots(home))
+                {
+                    if (!Directory.Exists(root))
+                        continue;
+
+                    IEnumerable<string> files;
+                    try { files = Directory.EnumerateFiles(root, "*.db", SearchOption.TopDirectoryOnly); }
+                    catch (IOException) { continue; }
+                    catch (UnauthorizedAccessException) { continue; }
+
+                    foreach (var file in files
+                        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (antigravitySeen.Add(file))
+                        {
+                            yield return file;
+                            foreach (var companion in SqliteCompanions(file).Where(File.Exists))
+                                if (antigravitySeen.Add(companion))
+                                    yield return companion;
+                        }
+                    }
+                }
+                yield break;
+            }
 
             if (providerId is ProviderId.OpenCode or ProviderId.OpenCodeGo)
             {
@@ -236,9 +386,28 @@ namespace TaskbarQuota.Usage
                     Path.Combine(home, ".claude", "projects"),
                     Path.Combine(home, ".config", "claude", "projects"),
                 },
-                ProviderId.Grok => new[] { Path.Combine(home, ".grok", "logs") },
+                ProviderId.Grok => new[] { Path.Combine(GrokHome(home), "logs") },
                 _ => Array.Empty<string>(),
             };
+
+            if (providerId == ProviderId.Grok)
+            {
+                // Grok Build writes one updates.jsonl per session under sessions/<cwd>/<id>/. The
+                // sibling chat_history and events logs are large and never carry usage.
+                var sessions = Path.Combine(GrokHome(home), "sessions");
+                if (Directory.Exists(sessions))
+                {
+                    IEnumerable<string> updates;
+                    try { updates = Directory.EnumerateFiles(sessions, "updates.jsonl", SearchOption.AllDirectories).ToList(); }
+                    catch (IOException) { updates = Array.Empty<string>(); }
+                    catch (UnauthorizedAccessException) { updates = Array.Empty<string>(); }
+                    var oldestUsefulWrite = DateTime.UtcNow.AddDays(-91);
+                    foreach (var file in updates
+                        .Where(path => LastWriteUtc(path) >= oldestUsefulWrite)
+                        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                        yield return file;
+                }
+            }
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var root in roots)
@@ -269,7 +438,7 @@ namespace TaskbarQuota.Usage
 
             if (providerId == ProviderId.Grok)
             {
-                var unified = Path.Combine(home, ".grok", "logs", "unified.jsonl");
+                var unified = Path.Combine(GrokHome(home), "logs", "unified.jsonl");
                 if (File.Exists(unified) && seen.Add(unified))
                     yield return unified;
             }
@@ -346,6 +515,51 @@ namespace TaskbarQuota.Usage
             };
         }
 
+        private static IEnumerable<string> AntigravityConversationRoots(string home)
+        {
+            var guiHome = Environment.GetEnvironmentVariable("ANTIGRAVITY_GUI_HOME");
+            var guiRoot = string.IsNullOrWhiteSpace(guiHome)
+                ? Path.Combine(home, ".gemini", "antigravity")
+                : guiHome.Trim();
+            yield return guiRoot;
+            yield return Path.Combine(guiRoot, "conversations");
+
+            var cliHome = Environment.GetEnvironmentVariable("ANTIGRAVITY_CLI_HOME");
+            var cliRoot = string.IsNullOrWhiteSpace(cliHome)
+                ? Path.Combine(home, ".gemini", "antigravity-cli")
+                : cliHome.Trim();
+            yield return cliRoot;
+            yield return Path.Combine(cliRoot, "conversations");
+        }
+
+        private static bool SqliteTableExists(SqliteConnection connection, string name)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name LIMIT 1";
+            command.Parameters.AddWithValue("$name", name);
+            return command.ExecuteScalar() is not null;
+        }
+
+        private static ulong ReadJsonUInt64(JsonElement element, string name)
+        {
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
+                return 0;
+            if (value.ValueKind == JsonValueKind.Number)
+            {
+                if (value.TryGetUInt64(out var number))
+                    return number;
+                if (value.TryGetDouble(out var real) && real > 0)
+                    return (ulong)real;
+            }
+            if (value.ValueKind == JsonValueKind.String
+                && ulong.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+            return 0;
+        }
+
+        // Usage records are under 200 KB; longer lines carry embedded images and can reach tens of MB.
+        internal const int MaxHistoryLineBytes = 1024 * 1024;
+
         private static IEnumerable<string> ReadSharedLines(string path)
         {
             using var stream = new FileStream(
@@ -353,9 +567,59 @@ namespace TaskbarQuota.Usage
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream);
-            while (reader.ReadLine() is { } line)
+            foreach (var line in ReadBoundedLines(stream, MaxHistoryLineBytes))
                 yield return line;
+        }
+
+        internal static IEnumerable<string> ReadBoundedLines(Stream stream, int maxLineBytes)
+        {
+            var buffer = new byte[64 * 1024];
+            var line = new MemoryStream();
+            bool skipping = false;
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                int start = 0;
+                for (int i = 0; i < read; i++)
+                {
+                    if (buffer[i] != (byte)'\n')
+                        continue;
+
+                    if (!skipping && line.Length + (i - start) <= maxLineBytes)
+                    {
+                        line.Write(buffer, start, i - start);
+                        yield return DecodeLine(line);
+                    }
+                    line.SetLength(0);
+                    skipping = false;
+                    start = i + 1;
+                }
+
+                if (skipping)
+                    continue;
+                if (line.Length + (read - start) > maxLineBytes)
+                {
+                    line.SetLength(0);
+                    skipping = true;
+                }
+                else
+                {
+                    line.Write(buffer, start, read - start);
+                }
+            }
+
+            if (!skipping && line.Length > 0)
+                yield return DecodeLine(line);
+        }
+
+        private static string DecodeLine(MemoryStream line)
+        {
+            var bytes = line.GetBuffer().AsSpan(0, (int)line.Length);
+            if (bytes.Length > 0 && bytes[^1] == (byte)'\r')
+                bytes = bytes[..^1];
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                bytes = bytes[3..];
+            return System.Text.Encoding.UTF8.GetString(bytes);
         }
 
         private static string ReadSharedText(string path)
@@ -375,12 +639,14 @@ namespace TaskbarQuota.Usage
             string? currentModel = null;
             string sessionId = string.Empty;
             string? previousSignature = null;
+            bool fast = false;
 
             foreach (var line in lines)
             {
                 if (!line.Contains("token_count", StringComparison.OrdinalIgnoreCase)
                     && !line.Contains("turn_context", StringComparison.OrdinalIgnoreCase)
-                    && !line.Contains("session_meta", StringComparison.OrdinalIgnoreCase))
+                    && !line.Contains("session_meta", StringComparison.OrdinalIgnoreCase)
+                    && !line.Contains("thread_settings_applied", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 if (!TryDocument(line, out var root))
@@ -401,6 +667,25 @@ namespace TaskbarQuota.Usage
                     && TryFindModel(root, out var contextModel))
                 {
                     currentModel = contextModel;
+                    continue;
+                }
+
+                // Codex records the requested service tier when thread settings apply. Omitted,
+                // "default" and "standard" bill at standard rates; "priority" (alias "fast") at
+                // the model's priority rates.
+                if (root.TryGetProperty("payload", out var settingsPayload)
+                    && settingsPayload.ValueKind == JsonValueKind.Object
+                    && settingsPayload.TryGetProperty("type", out var settingsType)
+                    && settingsType.GetString() == "thread_settings_applied")
+                {
+                    if (settingsPayload.TryGetProperty("thread_settings", out var settings)
+                        && settings.ValueKind == JsonValueKind.Object)
+                    {
+                        var tier = settings.TryGetProperty("service_tier", out var tierValue) && tierValue.ValueKind == JsonValueKind.String
+                            ? tierValue.GetString()
+                            : null;
+                        fast = tier is "priority" or "fast";
+                    }
                     continue;
                 }
 
@@ -434,10 +719,12 @@ namespace TaskbarQuota.Usage
 
                 if (TryFindModel(payload, out var model))
                     currentModel = model;
+                var tokens = usage.ToTokens(inputIncludesCache: true);
+                tokens.IsFast = fast;
                 events.Add(new UsageEvent(
                     timestamp,
                     currentModel ?? "gpt-5",
-                    usage.ToTokens(inputIncludesCache: true),
+                    tokens,
                     null,
                     sessionId,
                     null));
@@ -485,6 +772,107 @@ namespace TaskbarQuota.Usage
             return events;
         }
 
+        private const string GrokSessionKeyPrefix = "grok-session:";
+
+        /// <summary>Grok reports cost in integer ticks: 1 USD = 10^10 ticks.</summary>
+        private const double GrokCostTicksPerDollar = 10_000_000_000d;
+
+        private static string GrokHome(string home)
+        {
+            var configured = Environment.GetEnvironmentVariable("GROK_HOME");
+            return string.IsNullOrWhiteSpace(configured) ? Path.Combine(home, ".grok") : configured.Trim();
+        }
+
+        /// <summary>
+        /// Parses a Grok Build session log (<c>sessions/&lt;cwd&gt;/&lt;id&gt;/updates.jsonl</c>). Usage
+        /// lands on <c>turn_completed</c> updates with the billed cost in <c>costUsdTicks</c>;
+        /// <c>usage.modelUsage</c> splits a turn by model. Models without their own ticks share
+        /// the turn's remaining cost by token count.
+        /// </summary>
+        private static List<UsageEvent> ParseGrokSessionUpdates(IEnumerable<string> lines)
+        {
+            var events = new List<UsageEvent>();
+            foreach (var line in lines)
+            {
+                if (!line.Contains("\"turn_completed\"", StringComparison.Ordinal)
+                    || !TryDocument(line, out var root)
+                    || !root.TryGetProperty("params", out var parameters)
+                    || parameters.ValueKind != JsonValueKind.Object
+                    || !parameters.TryGetProperty("update", out var update)
+                    || update.ValueKind != JsonValueKind.Object
+                    || ReadDirectString(update, "sessionUpdate") != "turn_completed"
+                    || !update.TryGetProperty("usage", out var usage)
+                    || usage.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                DateTimeOffset timestamp;
+                if (parameters.TryGetProperty("_meta", out var meta) && ReadDirectInt64(meta, "agentTimestampMs") is { } agentMs)
+                    timestamp = DateTimeOffset.FromUnixTimeMilliseconds(agentMs);
+                else if (ReadDirectInt64(root, "timestamp") is { } seconds)
+                    timestamp = seconds > 1_000_000_000_000 ? DateTimeOffset.FromUnixTimeMilliseconds(seconds) : DateTimeOffset.FromUnixTimeSeconds(seconds);
+                else
+                    continue;
+
+                var sessionId = ReadDirectString(parameters, "sessionId") ?? string.Empty;
+                var turnKey = ReadDirectString(update, "prompt_id") ?? timestamp.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
+                var turnCost = GrokCostUsd(usage);
+
+                var models = new List<(string Model, TokenBreakdown Tokens, double? Cost)>();
+                if (usage.TryGetProperty("modelUsage", out var modelUsage) && modelUsage.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var entry in modelUsage.EnumerateObject())
+                    {
+                        if (entry.Name.Length == 0 || entry.Value.ValueKind != JsonValueKind.Object)
+                            continue;
+                        var tokens = GrokTokens(entry.Value);
+                        if (tokens.TotalTokens > 0)
+                            models.Add((entry.Name, tokens, GrokCostUsd(entry.Value)));
+                    }
+                }
+
+                if (models.Count == 0)
+                {
+                    var tokens = GrokTokens(usage);
+                    if (tokens.TotalTokens > 0)
+                        events.Add(new UsageEvent(timestamp, "grok", tokens, turnCost, sessionId, $"{GrokSessionKeyPrefix}{sessionId}:{turnKey}:grok"));
+                    continue;
+                }
+
+                var remaining = turnCost is { } total
+                    ? Math.Max(0, total - models.Sum(item => item.Cost ?? 0))
+                    : (double?)null;
+                var untickedTokens = (double)models.Where(item => item.Cost is null).Sum(item => (decimal)item.Tokens.TotalTokens);
+                foreach (var (model, tokens, cost) in models)
+                {
+                    var reported = cost ?? (remaining is { } share && untickedTokens > 0 ? share * tokens.TotalTokens / untickedTokens : null);
+                    events.Add(new UsageEvent(timestamp, model, tokens, reported, sessionId, $"{GrokSessionKeyPrefix}{sessionId}:{turnKey}:{model}"));
+                }
+            }
+            return events;
+        }
+
+        /// <summary>Grok Build counts cached reads and cache writes inside <c>inputTokens</c>.</summary>
+        private static TokenBreakdown GrokTokens(JsonElement usage)
+        {
+            var input = ReadDirectUInt64(usage, "inputTokens");
+            var cacheRead = ReadDirectUInt64(usage, "cachedReadTokens");
+            var cacheWrite = ReadDirectUInt64(usage, "cacheCreationTokens");
+            var output = ReadDirectUInt64(usage, "outputTokens");
+            return new TokenBreakdown
+            {
+                Input = input > cacheRead + cacheWrite ? input - cacheRead - cacheWrite : 0,
+                CacheRead = cacheRead,
+                CacheWrite5m = cacheWrite,
+                Output = output,
+                Reasoning = Math.Min(output, ReadDirectUInt64(usage, "reasoningTokens")),
+            };
+        }
+
+        private static double? GrokCostUsd(JsonElement usage)
+            => usage.TryGetProperty("costUsdTicks", out var ticks) && ticks.TryGetDouble(out var value) && value >= 0
+                ? value / GrokCostTicksPerDollar
+                : null;
+
         private static List<UsageEvent> ParseGrok(IEnumerable<string> lines)
         {
             var events = new List<UsageEvent>();
@@ -523,7 +911,9 @@ namespace TaskbarQuota.Usage
                 var eventModel = processId is { } modelPid && modelByProcess.TryGetValue(modelPid, out var known)
                     ? known
                     : "grok-unknown";
-                events.Add(new UsageEvent(timestamp, eventModel, tokens, null, processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty, null));
+                // "sid" is the Grok Build session id, which lets session-log usage supersede these events.
+                var sessionId = TryFindString(root, "sid") ?? processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+                events.Add(new UsageEvent(timestamp, eventModel, tokens, null, sessionId, null));
             }
 
             return events;
@@ -854,7 +1244,7 @@ namespace TaskbarQuota.Usage
             // Grok's local log carries no billed cost, so it is estimated from the bundled pricing
             // supplement (grok-4.5, composer-*, grok-build aliases) rather than left unpriced.
             => item.ReportedCostUsd
-                ?? PricingEngine.EstimateCostUsd(NormalizeModelName(item.Model), item.Tokens);
+                ?? PricingEngine.EstimateCostUsd(NormalizeModelName(item.Model), item.Tokens, item.Timestamp);
 
         /// <summary>
         /// T3 Code / Synara-style transcripts prefix the model id with the underlying provider id
@@ -869,14 +1259,16 @@ namespace TaskbarQuota.Usage
             => model.StartsWith("opencode-go/", StringComparison.OrdinalIgnoreCase);
 
         private static double CacheSavings(UsageEvent item)
-            => PricingEngine.EstimateCacheSavingsUsd(NormalizeModelName(item.Model), item.Tokens) ?? 0;
+            => PricingEngine.EstimateCacheSavingsUsd(NormalizeModelName(item.Model), item.Tokens, item.Timestamp) ?? 0;
 
         private static string SourceNote(ProviderId providerId) => providerId switch
         {
-            ProviderId.Grok => "From your Grok logs (estimated cost)",
+            ProviderId.Grok => "From your Grok Build logs (reported cost; older shell logs estimated)",
             ProviderId.OpenCode or ProviderId.OpenCodeGo => $"From your {DisplayName(providerId)} database (reported cost)",
             ProviderId.Cline or ProviderId.ClinePass => $"From your {DisplayName(providerId)} sessions (reported cost)",
             ProviderId.Zai => "From your Z.ai model usage database (estimated cost)",
+            ProviderId.Cursor => "Cursor dashboard reported tokens and API-rate costs",
+            ProviderId.Antigravity => "Antigravity locally recorded token counters (API-rate cost estimate)",
             _ => $"From your {DisplayName(providerId)} logs (estimated)",
         };
 
@@ -885,6 +1277,8 @@ namespace TaskbarQuota.Usage
             ProviderId.Codex => "Codex",
             ProviderId.Claude => "Claude",
             ProviderId.Grok => "Grok",
+            ProviderId.Cursor => "Cursor",
+            ProviderId.Antigravity => "Antigravity",
             ProviderId.OpenCode => "OpenCode",
             ProviderId.OpenCodeGo => "OpenCode Go",
             ProviderId.Cline => "Cline",
@@ -976,11 +1370,14 @@ namespace TaskbarQuota.Usage
                     : null;
 
         private static long? ReadDirectInt64(JsonElement element, string name)
-            => element.ValueKind == JsonValueKind.Object
-                && element.TryGetProperty(name, out var value)
-                && value.TryGetInt64(out var number)
-                    ? number
-                    : null;
+        {
+            if (element.ValueKind != JsonValueKind.Object
+                || !element.TryGetProperty(name, out var value)
+                || value.ValueKind != JsonValueKind.Number
+                || !value.TryGetInt64(out var number))
+                return null;
+            return number;
+        }
 
         private static long? ReadNestedInt64(JsonElement element, string objectName, string valueName)
             => element.ValueKind == JsonValueKind.Object

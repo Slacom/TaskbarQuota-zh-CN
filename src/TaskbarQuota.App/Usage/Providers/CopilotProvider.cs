@@ -64,7 +64,7 @@ namespace TaskbarQuota.Usage.Providers
                 if (reset is DateTimeOffset resetAt)
                     credits = credits.WithResetsAt(resetAt);
 
-                var usage = new UsageSnapshot(new RateWindow(usedPercent, null, reset, resetDescription))
+                var usage = new UsageSnapshot(new RateWindow(usedPercent, QuotaWindowLength.Monthly(reset), reset, resetDescription))
                 {
                     Cost = credits,
                     AdditionalUsage = TryParseAdditionalUsage(root),
@@ -219,12 +219,16 @@ namespace TaskbarQuota.Usage.Providers
         private static RateWindow ParseQuotaWindow(JsonElement snapshot, DateTimeOffset? fallbackReset)
         {
             bool unlimited = snapshot.TryGetProperty("unlimited", out var un) && un.ValueKind == JsonValueKind.True;
+            bool hasQuota = !snapshot.TryGetProperty("has_quota", out var hasQuotaEl)
+                || hasQuotaEl.ValueKind != JsonValueKind.False;
             double? limit = TryF64(snapshot, "entitlement");
             double? remaining = TryF64(snapshot, "remaining") ?? TryF64(snapshot, "quota_remaining");
 
             double used;
             if (unlimited)
                 used = 0;
+            else if (!hasQuota || limit is not > 0)
+                return new RateWindow(0) { IsIncluded = false };
             else if (limit is > 0 && remaining is not null)
                 used = System.Math.Clamp((limit.Value - remaining.Value) / limit.Value * 100, 0, 100);
             else
@@ -237,7 +241,7 @@ namespace TaskbarQuota.Usage.Providers
             if (snapshot.TryGetProperty("quota_reset_at", out var resetEl) && resetEl.TryGetInt64(out long ts) && ts > 0)
                 resetAt = DateTimeOffset.FromUnixTimeSeconds(ts);
 
-            return new RateWindow(used, null, resetAt, CodexProvider.FormatResetCountdown(resetAt));
+            return new RateWindow(used, QuotaWindowLength.Monthly(resetAt), resetAt, CodexProvider.FormatResetCountdown(resetAt));
         }
 
         private static DateTimeOffset? ParseReset(JsonElement root)
@@ -283,7 +287,7 @@ namespace TaskbarQuota.Usage.Providers
                 };
                 using var process = Process.Start(psi);
                 if (process == null)
-                    throw new InvalidOperationException("Could not start gh.");
+                    throw new InvalidOperationException("无法启动 gh。");
                 string output = process.StandardOutput.ReadToEnd().Trim();
                 process.WaitForExit(5000);
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))

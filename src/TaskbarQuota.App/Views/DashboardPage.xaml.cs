@@ -482,7 +482,13 @@ namespace TaskbarQuota.Views
                 return;
 
             bool wantPinned = toggle.IsChecked == true;
-            if (wantPinned && !Services.PinBudgetService.CanPin(card.ProviderId, out var reason))
+            bool pinHere = _pinHereDisplayKey.Length > 0
+                && WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Taskbar
+                && WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.Adaptive;
+            string? prospectiveDisplay = pinHere
+                ? _pinHereDisplayKey
+                : WidgetSettingsService.GetPinnedProviderDisplay(card.ProviderId);
+            if (wantPinned && !Services.PinBudgetService.CanPin(card.ProviderId, prospectiveDisplay, out var reason))
             {
                 // Over budget: refuse rather than silently unpinning something the user still wants, and
                 // show why plus what to change — a toggle that springs back with no explanation reads as
@@ -499,10 +505,7 @@ namespace TaskbarQuota.Views
             if (wantPinned)
                 ProviderDiscoveryService.SetWidgetVisibilityPreference(card.ProviderId, true);
 
-            if (wantPinned
-                && _pinHereDisplayKey.Length > 0
-                && WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Taskbar
-                && WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.Adaptive)
+            if (wantPinned && pinHere)
             {
                 WidgetSettingsService.SetPinnedProviderDisplay(card.ProviderId, _pinHereDisplayKey);
             }
@@ -526,11 +529,12 @@ namespace TaskbarQuota.Views
                 && WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.Adaptive;
             ProviderPinText.Text = canPinHere ? "固定到此处" : card.ProviderPinToggleText;
 
+            TaskbarWindowTarget.TryFindAll(out var pinDisplays);
             string? fixedDisplay = WidgetSettingsService.GetPinnedProviderDisplay(card.ProviderId);
             string tooltip = card.IsProviderPinned && fixedDisplay is not null
-                ? $"已固定到 {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}"
+? $"已固定到 {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay, pinDisplays)}"
                 : canPinHere
-                    ? $"将 {card.DisplayName} 固定到 {TaskbarWindowTarget.GetDisplayLabel(_pinHereDisplayKey)}"
+                    ? $"将 {card.DisplayName} 固定到 {TaskbarWindowTarget.GetDisplayLabel(_pinHereDisplayKey, pinDisplays)}"
                     : DefaultPinTooltip;
             ToolTipService.SetToolTip(ProviderPinToggle, tooltip);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ProviderPinToggle, tooltip);

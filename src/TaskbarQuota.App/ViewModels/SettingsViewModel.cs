@@ -109,13 +109,7 @@ namespace TaskbarQuota.ViewModels
             Providers.Clear();
             foreach (var provider in UsageCoordinator.Instance.Service.All)
             {
-                string status = ProviderDiscoveryService.IsConfigured(provider.Id)
-                    ? "已配置"
-                    : ProviderDiscoveryService.IsProbed(provider.Id)
-                        ? ProviderInstallDetector.IsInstalled(provider.Id)
-                            ? "等待应用"
-                            : "尚未设置"
-                        : "未知";
+                string status = GetProviderStatus(provider.Id);
 
                 Providers.Add(new ProviderSettingItemViewModel(
                     provider.Id,
@@ -135,6 +129,22 @@ namespace TaskbarQuota.ViewModels
                 item.IsWidgetVisible = WidgetSettingsService.IsProviderVisible(item.Id);
                 item.IsPinned = WidgetSettingsService.IsProviderPinned(item.Id);
             }
+        }
+
+        internal static string GetProviderStatus(ProviderId id)
+            => ProviderDiscoveryService.IsConfigured(id)
+                ? "已配置"
+                : ProviderDiscoveryService.IsProbed(id)
+                    ? ProviderInstallDetector.IsInstalled(id) ? "等待应用" : "尚未设置"
+                    : "未知";
+
+        public string RefreshProviderStatus(ProviderId id)
+        {
+            string status = GetProviderStatus(id);
+            foreach (var item in Providers)
+                if (item.Id == id)
+                    item.UpdateStatus(status);
+            return status;
         }
 
         public void ApplyDashboardVisibility(ProviderSettingItemViewModel item, bool visible)

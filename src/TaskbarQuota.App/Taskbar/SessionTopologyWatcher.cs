@@ -14,6 +14,7 @@ internal enum TopologyChangeKind
     SessionUnlock,
     ExplorerRestart,
     Resume,
+    LayoutFailure,
 }
 
 internal readonly record struct TopologyChange(TopologyChangeKind Kind, string Reason)
@@ -23,7 +24,8 @@ internal readonly record struct TopologyChange(TopologyChangeKind Kind, string R
         TopologyChangeKind.SessionDisconnect or
         TopologyChangeKind.SessionUnlock or
         TopologyChangeKind.ExplorerRestart or
-        TopologyChangeKind.Resume;
+        TopologyChangeKind.Resume or
+        TopologyChangeKind.LayoutFailure;
 }
 
 /// <summary>

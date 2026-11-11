@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -100,6 +101,126 @@ public sealed class AgentActivityTests
     [InlineData("code-insiders")]
     public void DesktopVsCodeProcess_IsRecognizedAsCopilot(string processName)
         => Assert.Equal(ProviderId.Copilot, AgentActivityScanner.DetectDesktopProviderForTesting(processName));
+
+    [Theory]
+    [InlineData("ChatGPT")]
+    [InlineData("chatgpt")]
+    [InlineData("Codex")]
+    public void CodexDesktopProcesses_MapToCodexButAreRecencyGated(string processName)
+    {
+        Assert.Equal(ProviderId.Codex, AgentActivityScanner.DetectDesktopProviderForTesting(processName));
+        Assert.True(AgentActivityScanner.IsRecencyGatedDesktopHostForTesting(processName));
+    }
+
+    [Fact]
+    public void CodexAppServer_IsRecencyGatedButInteractiveCodexIsNot()
+    {
+        const string appServer = @"C:\Users\me\AppData\Local\OpenAI\Codex\bin\abc\codex.exe -c features.x=true app-server --analytics-default-enabled";
+
+        Assert.Equal(ProviderId.Codex, AgentActivityScanner.DetectTerminalProviderForTesting("codex", appServer));
+        Assert.True(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting("codex", appServer));
+        Assert.True(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting(
+            "node", @"node C:\npm\node_modules\@openai\codex\bin\codex.js app-server"));
+        Assert.False(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting("codex", "codex --model gpt-5"));
+        Assert.False(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting("codex", @"codex ""fix the app-server tests"""));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void CodexWithUnreadableCommandLine_StaysRecencyGated(string commandLine)
+    {
+        Assert.Equal(ProviderId.Codex, AgentActivityScanner.DetectTerminalProviderForTesting("codex", commandLine));
+        Assert.True(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting("codex", commandLine));
+    }
+
+    [Fact]
+    public void CodexAppServer_QuotedOptionValueWithSpacesIsOneToken()
+    {
+        Assert.True(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting(
+            "codex", @"""C:\Program Files\Codex\codex.exe"" -C ""C:\My Projects\repo"" app-server"));
+        Assert.False(AgentActivityScanner.IsRecencyGatedTerminalCommandForTesting(
+            "codex", @"codex -C ""C:\My Projects\repo"" ""explain app-server"""));
+    }
+
+    [Fact]
+    public void RecencyGatedHost_DoesNotClaimStaleSession()
+    {
+        var now = DateTimeOffset.Now;
+        var live = new Dictionary<ProviderId, int> { [ProviderId.Codex] = 1 };
+        var gated = new HashSet<ProviderId> { ProviderId.Codex };
+
+        Assert.False(AgentActivityScanner.ShouldClaimLive(
+            ProviderId.Codex, now.AddDays(-14), 0, live, gated, now));
+        Assert.True(AgentActivityScanner.ShouldClaimLive(
+            ProviderId.Codex, now.AddMinutes(-10), 0, live, gated, now));
+    }
+
+    [Fact]
+    public void UngatedHost_StillClaimsQuietSession()
+    {
+        var now = DateTimeOffset.Now;
+        var live = new Dictionary<ProviderId, int> { [ProviderId.Codex] = 1 };
+
+        Assert.True(AgentActivityScanner.ShouldClaimLive(
+            ProviderId.Codex, now.AddDays(-14), 0, live, new HashSet<ProviderId>(), now));
+        Assert.False(AgentActivityScanner.ShouldClaimLive(
+            ProviderId.Codex, now, 1, live, new HashSet<ProviderId>(), now));
+    }
+
+    [Fact]
+    public void ResolveLiveProviders_OnlyInteractiveTerminalCodexLiftsRecencyGate()
+    {
+        var desktop = new Dictionary<ProviderId, int> { [ProviderId.Codex] = 1 };
+        var gatedDesktop = new HashSet<ProviderId> { ProviderId.Codex };
+        var terminal = new Dictionary<ProviderId, int> { [ProviderId.Codex] = 2 };
+
+        var (_, gatedAlone) = AgentActivityScanner.ResolveLiveProviders(
+            desktop, gatedDesktop, new Dictionary<ProviderId, int>(), new HashSet<ProviderId>(), _ => false);
+        var (_, gatedAppServer) = AgentActivityScanner.ResolveLiveProviders(
+            desktop, gatedDesktop, new Dictionary<ProviderId, int> { [ProviderId.Codex] = 1 },
+            new HashSet<ProviderId> { ProviderId.Codex }, _ => false);
+        var (live, gatedWithCli) = AgentActivityScanner.ResolveLiveProviders(
+            desktop, gatedDesktop, terminal, new HashSet<ProviderId>(), _ => false);
+
+        Assert.Contains(ProviderId.Codex, gatedAlone);
+        Assert.Contains(ProviderId.Codex, gatedAppServer);
+        Assert.DoesNotContain(ProviderId.Codex, gatedWithCli);
+        Assert.Equal(2, live[ProviderId.Codex]);
+    }
+
+    [Fact]
+    public void ResolveLiveProviders_DropsDisabledProviders()
+    {
+        var desktop = new Dictionary<ProviderId, int> { [ProviderId.Codex] = 1, [ProviderId.Claude] = 1 };
+        var terminal = new Dictionary<ProviderId, int> { [ProviderId.Codex] = 1 };
+
+        var (live, gated) = AgentActivityScanner.ResolveLiveProviders(
+            desktop, new HashSet<ProviderId> { ProviderId.Codex }, terminal,
+            new HashSet<ProviderId> { ProviderId.Codex }, id => id == ProviderId.Codex);
+
+        Assert.False(live.ContainsKey(ProviderId.Codex));
+        Assert.True(live.ContainsKey(ProviderId.Claude));
+        Assert.Empty(gated);
+    }
+
+    [Fact]
+    public void RecentOnlyAccumulator_SkipsStaleLatestFallback()
+    {
+        var stale = DateTime.UtcNow.AddDays(-14);
+        var gatedOutput = new List<(ProviderId, string, DateTimeOffset)>();
+        var ungatedOutput = new List<(ProviderId, string, DateTimeOffset)>();
+
+        var gated = new AgentActivityScanner.ProcessBackedCandidateAccumulator(gatedOutput, recentOnly: true);
+        gated.Add(ProviderId.Codex, "old.jsonl", stale);
+        gated.Complete();
+        var ungated = new AgentActivityScanner.ProcessBackedCandidateAccumulator(ungatedOutput);
+        ungated.Add(ProviderId.Codex, "old.jsonl", stale);
+        ungated.Complete();
+
+        Assert.Empty(gatedOutput);
+        Assert.Single(ungatedOutput);
+    }
 
     [Fact]
     public void CopilotJsonSession_ExtractsPromptModelAndCompletedState()

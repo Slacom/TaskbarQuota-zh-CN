@@ -21,6 +21,10 @@ public class SessionTopologyRecoveryTests
     }
 
     [Fact]
+    public void Layout_failure_rebuilds_hosts()
+        => Assert.True(new TopologyChange(TopologyChangeKind.LayoutFailure, "layout cycle").RequiresHostReset);
+
+    [Fact]
     public void Unrelated_session_change_is_ignored()
         => Assert.False(SessionTopologyWatcher.TryMapSessionChange(0x7fff, out _));
 

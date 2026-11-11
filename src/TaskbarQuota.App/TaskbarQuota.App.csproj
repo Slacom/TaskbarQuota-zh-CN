@@ -24,6 +24,9 @@
     <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
     <!-- Loose .xbf beside the exe; required for unpackaged publish (embedded-only Release PRI was not copied). -->
     <DisableEmbeddedXbf>true</DisableEmbeddedXbf>
+    <!-- Idle-footprint tuning: no background-GC thread, no PGO instrumentation overhead. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>false</TieredPGO>
     <PublishTrimmed>false</PublishTrimmed>
     <PublishSingleFile>false</PublishSingleFile>
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
@@ -31,9 +34,9 @@
     <Product>TaskbarQuota</Product>
     <AssemblyName>TaskbarQuota</AssemblyName>
     <ApplicationIcon>Assets\TaskBarQuota.ico</ApplicationIcon>
-    <Version>1.3.2.3</Version>
-    <AssemblyVersion>1.3.2.3</AssemblyVersion>
-    <FileVersion>1.3.2.3</FileVersion>
+    <Version>1.4.0</Version>
+    <AssemblyVersion>1.4.0.0</AssemblyVersion>
+    <FileVersion>1.4.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

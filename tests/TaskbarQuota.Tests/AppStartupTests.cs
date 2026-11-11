@@ -1,4 +1,5 @@
 using TaskbarQuota;
+using Microsoft.Windows.AppLifecycle;
 
 namespace TaskbarQuota.Tests;
 
@@ -20,6 +21,13 @@ public class AppStartupTests
     public void IsWidgetStartup_WhenNoStartupFlag_ReturnsFalse()
     {
         Assert.False(App.IsWidgetStartup(null, ["TaskbarQuota.exe"]));
+    }
+
+    [Fact]
+    public void IsWidgetStartup_WhenActivatedByStartupTask_ReturnsTrue()
+    {
+        Assert.True(App.IsWidgetStartup(null, ["TaskbarQuota.exe"], ExtendedActivationKind.StartupTask));
+        Assert.False(App.ShouldSurfaceWindowOnActivation(null, ExtendedActivationKind.StartupTask));
     }
 
     [Fact]

@@ -75,6 +75,12 @@ public static class WidgetSettingsService
     private static string FloatingOpacityPath =>
         Path.Combine(AppStorage.AppDataDirectory, "floating-opacity.txt");
 
+    private static string FloatingWindowOpacityPath =>
+        Path.Combine(AppStorage.AppDataDirectory, "floating-window-opacity.txt");
+
+    private static string FloatingClickThroughPath =>
+        Path.Combine(AppStorage.AppDataDirectory, "floating-click-through.txt");
+
     private static string TaskbarPlacementModePath =>
         Path.Combine(AppStorage.AppDataDirectory, "taskbar-placement-mode.txt");
 
@@ -96,16 +102,16 @@ public static class WidgetSettingsService
     private static readonly string WidgetRowsPath =
         Path.Combine(AppStorage.AppDataDirectory, "widget-rows.json");
 
-    private static readonly string WidgetProvidersPath =
+    private static string WidgetProvidersPath =>
         Path.Combine(AppStorage.AppDataDirectory, "widget-providers.json");
 
-    private static readonly string WidgetPinsPath =
+    private static string WidgetPinsPath =>
         Path.Combine(AppStorage.AppDataDirectory, "widget-pins.json");
 
-    private static readonly string DashboardProvidersPath =
+    private static string DashboardProvidersPath =>
         Path.Combine(AppStorage.AppDataDirectory, "dashboard-providers.json");
 
-    private static readonly string AutoHideUnavailablePath =
+    private static string AutoHideUnavailablePath =>
         Path.Combine(AppStorage.AppDataDirectory, "auto-hide-unavailable.txt");
 
     private static readonly string HideWhenUnfocusedPath =
@@ -130,12 +136,30 @@ public static class WidgetSettingsService
     /// <summary>Default floating Acrylic strength.</summary>
     public const double FloatingOpacityDefault = 0.90;
 
+    /// <summary>
+    /// Minimum whole-window opacity for the floating HUD (20%). Kept above zero so a translucent,
+    /// click-through HUD can never become invisible and unreachable.
+    /// </summary>
+    public const double FloatingWindowOpacityMin = 0.20;
+    /// <summary>Maximum whole-window opacity; 100% is the regular, non-layered window.</summary>
+    public const double FloatingWindowOpacityMax = 1.0;
+
     public static WidgetDisplayMode Current { get; private set; } = LoadWidgetDisplayMode();
     public static WidgetSurfaceMode CurrentSurface { get; private set; } = LoadWidgetSurfaceMode();
     public static TaskbarPlacementMode CurrentTaskbarPlacement { get; private set; } = LoadTaskbarPlacementMode();
     public static string SelectedTaskbarDisplayKey { get; private set; } = LoadSelectedTaskbarDisplayKey();
     /// <summary>Floating window Acrylic strength in the range [<see cref="FloatingOpacityMin"/>, <see cref="FloatingOpacityMax"/>].</summary>
     public static double FloatingOpacity { get; private set; } = LoadFloatingOpacity();
+    /// <summary>
+    /// Opacity of the whole floating window (text, icons, bars and Acrylic), independent of
+    /// <see cref="FloatingOpacity"/>. 100% (the default) keeps the window non-layered.
+    /// </summary>
+    public static double FloatingWindowOpacity { get; private set; } = LoadFloatingWindowOpacity();
+    /// <summary>
+    /// Opt-in: mouse input passes through the floating window to the app underneath. Holding Ctrl over
+    /// the window temporarily restores interaction so it can still be clicked, dragged or scrolled.
+    /// </summary>
+    public static bool FloatingClickThrough { get; private set; } = LoadFloatingClickThrough();
     public static PercentageDisplayMode CurrentPercentageMode { get; private set; } = LoadPercentageDisplayMode();
     public static ResetDisplayMode CurrentResetDisplayMode { get; private set; } = LoadResetDisplayMode();
     public static bool AutoHideUnavailable { get; private set; } = LoadAutoHideUnavailable();
@@ -154,10 +178,151 @@ public static class WidgetSettingsService
     public static event EventHandler? DashboardCompositionChanged;
     public static event EventHandler? PercentageModeChanged;
 
+    private static readonly string ProviderIconColorsPath =
+        Path.Combine(AppStorage.AppDataDirectory, "provider-icon-colors.json");
+
+    private static readonly string MonochromeProviderIconsPath =
+        Path.Combine(AppStorage.AppDataDirectory, "monochrome-provider-icons.txt");
+
+    private static readonly Dictionary<string, string> ProviderIconColors = LoadProviderIconColors();
+
+    /// <summary>When true the widget ignores every provider icon color and uses the plain theme foreground.</summary>
+    public static bool MonochromeProviderIcons { get; private set; } = LoadMonochromeProviderIcons();
+
+    /// <summary>
+    /// Built-in widget icon color for a provider as <c>#RRGGBB</c>, or null for the plain theme foreground
+    /// (white on a dark taskbar). Only providers whose logos would otherwise be hard to tell apart get a color.
+    /// </summary>
+    public static string? DefaultProviderIconColorHex(ProviderId provider) => provider switch
+    {
+        ProviderId.Claude => "#D97757",
+        ProviderId.Antigravity => "#5B8DEF",
+        ProviderId.Copilot => "#8957E5",
+        ProviderId.Devin => "#21C093",
+        ProviderId.Cline => "#B084F5",
+        ProviderId.ClinePass => "#B084F5",
+        ProviderId.Zai => "#2D6BFF",
+        ProviderId.Kimi => "#1783FF",
+        _ => null,
+    };
+
+    /// <summary>The user's chosen color, else the built-in default, ignoring the monochrome toggle (for the settings UI).</summary>
+    public static string? GetConfiguredProviderIconColorHex(ProviderId provider)
+        => ProviderIconColors.TryGetValue(provider.ToString(), out var hex) && TryNormalizeHexColor(hex, out var normalized)
+            ? normalized
+            : DefaultProviderIconColorHex(provider);
+
+    /// <summary>The color the widget should actually draw this provider's icon with; null means the theme foreground.</summary>
+    public static string? GetProviderIconColorHex(ProviderId provider)
+        => MonochromeProviderIcons ? null : GetConfiguredProviderIconColorHex(provider);
+
+    public static bool HasCustomProviderIconColor(ProviderId provider)
+        => ProviderIconColors.ContainsKey(provider.ToString());
+
+    public static void SetProviderIconColor(ProviderId provider, string hex)
+    {
+        if (!TryNormalizeHexColor(hex, out var normalized))
+            return;
+
+        ProviderIconColors[provider.ToString()] = normalized;
+        SaveProviderIconColors();
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    public static void ResetProviderIconColor(ProviderId provider)
+    {
+        if (!ProviderIconColors.Remove(provider.ToString()))
+            return;
+
+        SaveProviderIconColors();
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    public static void ApplyMonochromeProviderIcons(bool monochrome)
+    {
+        if (MonochromeProviderIcons == monochrome)
+            return;
+
+        MonochromeProviderIcons = monochrome;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(MonochromeProviderIconsPath)!);
+            File.WriteAllText(MonochromeProviderIconsPath, monochrome ? "1" : "0");
+        }
+        catch
+        {
+            // Best effort. The widget can still use the in-memory value for this run.
+        }
+
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>Accepts <c>#RRGGBB</c> (or without '#') and returns it upper-cased as <c>#RRGGBB</c>.</summary>
+    public static bool TryNormalizeHexColor(string? value, out string normalized)
+    {
+        normalized = "";
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        string digits = value.Trim().TrimStart('#');
+        if (digits.Length != 6 || !int.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out _))
+            return false;
+
+        normalized = "#" + digits.ToUpperInvariant();
+        return true;
+    }
+
+    private static Dictionary<string, string> LoadProviderIconColors()
+    {
+        try
+        {
+            if (!File.Exists(ProviderIconColorsPath))
+                return new Dictionary<string, string>();
+
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(ProviderIconColorsPath))
+                ?? new Dictionary<string, string>();
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
+    }
+
+    private static void SaveProviderIconColors()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProviderIconColorsPath)!);
+            File.WriteAllText(ProviderIconColorsPath, JsonSerializer.Serialize(ProviderIconColors, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch
+        {
+            // Best effort. The widget can still use the in-memory value for this run.
+        }
+    }
+
+    // Colors are on by default, so an absent file means "not monochrome".
+    private static bool LoadMonochromeProviderIcons()
+    {
+        try
+        {
+            if (!File.Exists(MonochromeProviderIconsPath))
+                return false;
+
+            return int.TryParse(File.ReadAllText(MonochromeProviderIconsPath), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) && value != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     internal static void ReloadSurfaceSettingsForTesting()
     {
         CurrentSurface = LoadWidgetSurfaceMode();
         FloatingOpacity = LoadFloatingOpacity();
+        FloatingWindowOpacity = LoadFloatingWindowOpacity();
+        FloatingClickThrough = LoadFloatingClickThrough();
     }
 
     internal static void ReloadTaskbarPlacementForTesting()
@@ -190,10 +355,15 @@ public static class WidgetSettingsService
     }
 
     internal static void RestoreSurfaceSettingsForTesting(
-        WidgetSurfaceMode surface, double floatingOpacity)
+        WidgetSurfaceMode surface,
+        double floatingOpacity,
+        double floatingWindowOpacity = FloatingWindowOpacityMax,
+        bool floatingClickThrough = false)
     {
         CurrentSurface = surface;
         FloatingOpacity = floatingOpacity;
+        FloatingWindowOpacity = floatingWindowOpacity;
+        FloatingClickThrough = floatingClickThrough;
     }
 
     public static void Apply(WidgetDisplayMode mode)
@@ -298,6 +468,31 @@ public static class WidgetSettingsService
         FloatingOpacity = clamped;
         // Persist as integer percent for stable round-trips.
         Save(FloatingOpacityPath, (int)Math.Round(clamped * 100));
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Sets whole-window opacity for the floating HUD. Values outside
+    /// [<see cref="FloatingWindowOpacityMin"/>, <see cref="FloatingWindowOpacityMax"/>] are clamped.
+    /// </summary>
+    public static void ApplyFloatingWindowOpacity(double opacity)
+    {
+        double clamped = Math.Clamp(opacity, FloatingWindowOpacityMin, FloatingWindowOpacityMax);
+        if (Math.Abs(FloatingWindowOpacity - clamped) < 0.005)
+            return;
+
+        FloatingWindowOpacity = clamped;
+        Save(FloatingWindowOpacityPath, (int)Math.Round(clamped * 100));
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    public static void ApplyFloatingClickThrough(bool enabled)
+    {
+        if (FloatingClickThrough == enabled)
+            return;
+
+        FloatingClickThrough = enabled;
+        Save(FloatingClickThroughPath, enabled ? 1 : 0);
         Changed?.Invoke(null, EventArgs.Empty);
     }
 
@@ -444,12 +639,20 @@ public static class WidgetSettingsService
     internal static void SaveProviderVisibilityAndNotify()
     {
         SaveProviderVisibility();
-        Changed?.Invoke(null, EventArgs.Empty);
+        NotifyProviderVisibilityChanged();
     }
 
     internal static void SaveDashboardProviderVisibilityAndNotify()
     {
         SaveDashboardProviderVisibility();
+        NotifyDashboardProviderVisibilityChanged();
+    }
+
+    internal static void NotifyProviderVisibilityChanged()
+        => Changed?.Invoke(null, EventArgs.Empty);
+
+    internal static void NotifyDashboardProviderVisibilityChanged()
+    {
         DashboardCompositionChanged?.Invoke(null, EventArgs.Empty);
         Changed?.Invoke(null, EventArgs.Empty);
     }
@@ -461,7 +664,6 @@ public static class WidgetSettingsService
 
         AutoHideUnavailable = enabled;
         Save(AutoHideUnavailablePath, enabled ? 1 : 0);
-        ProviderDiscoveryService.ReconcileUnavailableVisibility();
         DashboardCompositionChanged?.Invoke(null, EventArgs.Empty);
         Changed?.Invoke(null, EventArgs.Empty);
     }
@@ -483,8 +685,9 @@ public static class WidgetSettingsService
 
         ShowAgentActivityInWidget = enabled;
         Save(ShowAgentActivityInWidgetPath, enabled ? 1 : 0);
-        // Activity shares the taskbar area with quota tiles. Rebalance pins immediately so enabling it
-        // leaves room for the active quota tile plus one pinned tile (the normal cap is three quota tiles).
+        // Activity shares the taskbar area with quota tiles. Start reconciling pins against the effective
+        // two-tile cap; hysteresis delays eviction until the over-budget geometry is stable, and the active
+        // tile fills a remaining slot only after pins have been placed.
         Services.PinBudgetService.EnforceBudget(notify: false);
         Changed?.Invoke(null, EventArgs.Empty);
     }
@@ -509,7 +712,7 @@ public static class WidgetSettingsService
         SaveRowVisibility();
         // Enabling a row can promote a pinned provider from short to long and push the pinned set over
         // budget. The row toggle always wins — it is this provider's own display setting — so the budget
-        // is rebalanced by dropping the least recently used pin instead of refusing the change.
+        // is reconciled by eventually dropping the least recently used pin instead of refusing the change.
         //
         // Silent, because the single Changed below already covers both edits. Letting the rebalance raise
         // its own notification meant one row toggle rebuilt the nav badges, the flyout strip and every
@@ -627,6 +830,7 @@ public static class WidgetSettingsService
                 new(RowPrimary, "Session"),
                 new(RowSecondary, "Weekly"),
                 new(RowModelSpecific, "Model weekly"),
+                new(RowResetCredits, "Reset credits"),
                 new(RowExtra, "Extra weekly rows"),
             ],
             ProviderId.Cursor =>
@@ -790,6 +994,42 @@ public static class WidgetSettingsService
         catch
         {
             return FloatingOpacityDefault;
+        }
+    }
+
+    private static double LoadFloatingWindowOpacity()
+    {
+        try
+        {
+            if (!File.Exists(FloatingWindowOpacityPath))
+                return FloatingWindowOpacityMax;
+
+            string raw = File.ReadAllText(FloatingWindowOpacityPath).Trim();
+            return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int percent)
+                && percent is >= 1 and <= 100
+                    ? Math.Clamp(percent / 100d, FloatingWindowOpacityMin, FloatingWindowOpacityMax)
+                    : FloatingWindowOpacityMax;
+        }
+        catch
+        {
+            return FloatingWindowOpacityMax;
+        }
+    }
+
+    // Opt-in, so an absent file means off: existing installs keep a fully interactive HUD.
+    private static bool LoadFloatingClickThrough()
+    {
+        try
+        {
+            if (!File.Exists(FloatingClickThroughPath))
+                return false;
+
+            string raw = File.ReadAllText(FloatingClickThroughPath);
+            return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) && value != 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -970,7 +1210,7 @@ public static class WidgetSettingsService
         }
     }
 
-    private static void SaveProviderVisibility()
+    internal static void SaveProviderVisibility()
     {
         try
         {
@@ -1028,7 +1268,7 @@ public static class WidgetSettingsService
         }
     }
 
-    private static void SaveDashboardProviderVisibility()
+    internal static void SaveDashboardProviderVisibility()
     {
         try
         {

@@ -3,7 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.Windows.AppLifecycle;
 using TaskbarQuota.Diagnostics;
+using TaskbarQuota.Interop;
 using TaskbarQuota.Services;
 using TaskbarQuota.Taskbar;
 
@@ -26,6 +28,7 @@ namespace TaskbarQuota
         private const int TaskbarInitializationRetryDelayMilliseconds = 2500;
 
         private MainWindow? _mainWindow;
+        private MemoryTrimmer? _memoryTrimmer;
         private Timer? _taskbarInitializationTimer;
         private int _taskbarInitializationAttempts;
         private int _taskbarInitializationQueued;
@@ -37,12 +40,15 @@ namespace TaskbarQuota
             {
                 Log.Error(e.Exception, "Unhandled exception");
                 e.Handled = true;
+                if (e.Exception is LayoutCycleException)
+                    TaskBarManager.RebuildAfterLayoutFailure();
             };
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             Dispatcher = DispatcherQueue.GetForCurrentThread();
+            RegisterForWindowsRestart(IsWidgetStartup(args.Arguments, Environment.GetCommandLineArgs(), Program.InitialActivationKind));
             AppStorage.MigrateLegacyDataIfNeeded();
             StartupSettingsService.MigrateLegacyStartupEntryIfNeeded();
 
@@ -51,6 +57,7 @@ namespace TaskbarQuota
 
             UsageCoordinator.Instance.Start();
             QuotaAlertService.Instance.Start();
+            _memoryTrimmer = new MemoryTrimmer();
 
             _ = Task.Run(() =>
             {
@@ -68,7 +75,7 @@ namespace TaskbarQuota
             };
             updateTimer.Start();
 
-            if (!IsWidgetStartup(args.Arguments, Environment.GetCommandLineArgs()))
+            if (!IsWidgetStartup(args.Arguments, Environment.GetCommandLineArgs(), Program.InitialActivationKind))
             {
                 try
                 {
@@ -80,6 +87,21 @@ namespace TaskbarQuota
                 }
             }
 
+        }
+
+        private static void RegisterForWindowsRestart(bool widgetStartup)
+        {
+            try
+            {
+                var result = Kernel32.RegisterApplicationRestart(
+                    widgetStartup ? StartupSettingsService.StartupArgument : null,
+                    ApplicationRestart.NoReboot);
+                Log.Debug($"Registered Windows restart recovery: HRESULT 0x{result:X8}");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Could not register Windows restart recovery");
+            }
         }
 
         public void ShowMainWindow()
@@ -102,9 +124,11 @@ namespace TaskbarQuota
         /// <summary>Handles an activation that a second process redirected to this instance
         /// (Start menu, Microsoft Store "Open", another double-click). Surfaces the existing
         /// window instead of letting a duplicate widget appear.</summary>
-        internal static void HandleRedirectedActivation(string? activationArguments)
+        internal static void HandleRedirectedActivation(
+            string? activationArguments,
+            ExtendedActivationKind activationKind = ExtendedActivationKind.Launch)
         {
-            if (!ShouldSurfaceWindowOnActivation(activationArguments))
+            if (!ShouldSurfaceWindowOnActivation(activationArguments, activationKind))
                 return;
 
             var dispatcher = Dispatcher;
@@ -119,8 +143,10 @@ namespace TaskbarQuota
 
         /// <summary>A redirected startup-widget launch must stay in the tray, matching the
         /// behaviour of a cold start with the same argument.</summary>
-        internal static bool ShouldSurfaceWindowOnActivation(string? activationArguments)
-            => !IsWidgetStartup(activationArguments);
+        internal static bool ShouldSurfaceWindowOnActivation(
+            string? activationArguments,
+            ExtendedActivationKind activationKind = ExtendedActivationKind.Launch)
+            => !IsWidgetStartup(activationArguments, activationKind: activationKind);
 
         private void ScheduleTaskbarInitialization()
         {
@@ -202,6 +228,8 @@ namespace TaskbarQuota
         public static void Quit()
         {
             IsQuitting = true;
+            try { Kernel32.UnregisterApplicationRestart(); }
+            catch (Exception ex) { Log.Warning(ex, "Could not unregister Windows restart recovery"); }
             Quitting?.Invoke();
             Current.Exit();
         }
@@ -209,8 +237,14 @@ namespace TaskbarQuota
         internal static bool ShouldRetryTaskbarInitialization(int completedAttempts)
             => completedAttempts < TaskbarInitializationMaxAttempts;
 
-        internal static bool IsWidgetStartup(string? activationArguments, string[]? commandLineArguments = null)
+        internal static bool IsWidgetStartup(
+            string? activationArguments,
+            string[]? commandLineArguments = null,
+            ExtendedActivationKind activationKind = ExtendedActivationKind.Launch)
         {
+            if (activationKind == ExtendedActivationKind.StartupTask)
+                return true;
+
             if (ContainsStartupArgument(activationArguments))
                 return true;
 

@@ -19,13 +19,19 @@ namespace TaskbarQuota.Views
     {
         public SettingsViewModel ViewModel { get; } = new();
         private bool _isInitializing;
+        private bool _updatingStartupToggle;
         // Suppresses the Toggled handlers while a row's toggles are synced programmatically.
         private bool _suppressProviderToggleEvents;
+        private bool _suppressProviderMuteEvents;
         private bool _suppressTaskbarPlacementEvents;
+        private bool _suppressSurfaceEvents;
         private Slider? _floatingOpacitySlider;
+        private Slider? _floatingWindowOpacitySlider;
         // Per-provider controls, so changing one updates only its own row instead of rebuilding the list.
         private readonly Dictionary<ProviderId, ProviderToggleRow> _providerRows = new();
+        private readonly Dictionary<ProviderId, CheckBox> _providerMuteControls = new();
         private readonly List<PinOption> _pinOptions = new();
+        private IReadOnlyList<DisplayIdentity> _pinDisplayIdentities = [];
 
         private sealed record TaskbarPlacementOption(
             string Label,
@@ -40,6 +46,7 @@ namespace TaskbarQuota.Views
 
         private sealed class ProviderToggleRow
         {
+            public TextBlock? Status;
             public ToggleSwitch? Dashboard;
             public ToggleSwitch? Widget;
             public ComboBox? Pin;
@@ -49,7 +56,9 @@ namespace TaskbarQuota.Views
         {
             _isInitializing = true;
             InitializeComponent();
+            InitializeProviderOrder();
             BuildFloatingOpacitySlider();
+            BuildFloatingWindowOpacitySlider();
             ThemeCombo.SelectedIndex = ThemeService.Current switch
             {
                 ElementTheme.Light => 1,
@@ -63,7 +72,9 @@ namespace TaskbarQuota.Views
             if (_floatingOpacitySlider is { } slider)
                 slider.Value = opacityPercent;
             FloatingOpacityLabel.Text = $"{opacityPercent}%";
-            FloatingOpacityCard.IsEnabled = WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Floating;
+            FloatingWindowOpacityLabel.Text = $"{(int)System.Math.Round(WidgetSettingsService.FloatingWindowOpacity * 100)}%";
+            FloatingClickThroughToggle.IsOn = WidgetSettingsService.FloatingClickThrough;
+            SetFloatingCardsEnabled(WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Floating);
             TaskbarPlacementCard.IsEnabled = WidgetSettingsService.CurrentSurface == WidgetSurfaceMode.Taskbar;
             WidgetModeCombo.SelectedIndex = WidgetSettingsService.Current switch
             {
@@ -73,15 +84,22 @@ namespace TaskbarQuota.Views
             };
             PercentageModeCombo.SelectedIndex = WidgetSettingsService.CurrentPercentageMode == PercentageDisplayMode.Remaining ? 1 : 0;
             ResetDisplayModeCombo.SelectedIndex = WidgetSettingsService.CurrentResetDisplayMode == ResetDisplayMode.AbsoluteTime ? 1 : 0;
-            StartupToggle.IsOn = StartupSettingsService.IsEnabled;
+            StartupToggle.IsEnabled = false;
             ApplyQuotaAlertSettingsToControls();
             AutoHideUnavailableToggle.IsOn = WidgetSettingsService.AutoHideUnavailable;
             HideWhenUnfocusedToggle.IsOn = WidgetSettingsService.HideWhenProviderUnfocused;
+            ColoredIconsToggle.IsOn = !WidgetSettingsService.MonochromeProviderIcons;
             ViewModel.ReloadProviders();
             RebuildProviderSettings();
+            RebuildMutedProviderSettings();
+            RebuildIconColorSettings();
+            RefreshProviderOrder();
             VersionLabel.Text = $"版本 {AppVersion.GetDisplayLabel()}";
-            Loaded += (_, _) =>
+            Loaded += async (_, _) =>
             {
+                ProviderDiscoveryService.Changed -= OnProviderDiscoveryChanged;
+                ProviderDiscoveryService.Changed += OnProviderDiscoveryChanged;
+                await RefreshStartupToggleAsync();
                 Log.Information(
                     $"Settings page loaded (surface={WidgetSettingsService.CurrentSurface}, layout={WidgetSettingsService.Current})");
                 WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
@@ -90,33 +108,25 @@ namespace TaskbarQuota.Views
                 BuildTaskbarPlacementOptions();
                 BuildPinOptions();
                 RebuildProviderSettings();
+                RebuildMutedProviderSettings();
+                RebuildIconColorSettings();
+                RefreshProviderOrder();
             };
-            Unloaded += (_, _) => WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
+            Unloaded += (_, _) =>
+            {
+                WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
+                ProviderDiscoveryService.Changed -= OnProviderDiscoveryChanged;
+            };
             _isInitializing = false;
         }
 
-        private void OnWidgetSettingsChanged(object? sender, System.EventArgs e)
-        {
-            if (!DispatcherQueue.HasThreadAccess)
+        private void OnProviderDiscoveryChanged(ProviderId id)
+            => DispatcherQueue.TryEnqueue(() =>
             {
-                DispatcherQueue.TryEnqueue(() => OnWidgetSettingsChanged(sender, e));
-                return;
-            }
-
-            bool wasInitializing = _isInitializing;
-            _isInitializing = true;
-            try
-            {
-                AutoHideUnavailableToggle.IsOn = WidgetSettingsService.AutoHideUnavailable;
-                ViewModel.RefreshProviderVisibility();
-                foreach (var item in ViewModel.Providers)
-                    RefreshProviderRow(item);
-            }
-            finally
-            {
-                _isInitializing = wasInitializing;
-            }
-        }
+                string status = ViewModel.RefreshProviderStatus(id);
+                if (_providerRows.TryGetValue(id, out var row) && row.Status is { } text)
+                    text.Text = status;
+            });
 
         private void RebuildProviderSettings()
         {
@@ -135,15 +145,16 @@ namespace TaskbarQuota.Views
                     Text = item.DisplayName,
                     Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
                 });
-                header.Children.Add(new TextBlock
+                var statusText = new TextBlock
                 {
                     Text = item.StatusText,
                     Opacity = 0.65,
                     Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                });
+                };
+                header.Children.Add(statusText);
                 card.Header = header;
 
-                var toggles = new ProviderToggleRow();
+                var toggles = new ProviderToggleRow { Status = statusText };
                 _providerRows[item.Id] = toggles;
 
                 var content = new StackPanel { Spacing = 8, MinWidth = 180 };
@@ -153,6 +164,27 @@ namespace TaskbarQuota.Views
                 card.Content = content;
 
                 ProviderSettingsPanel.Children.Add(card);
+            }
+        }
+
+        private void RebuildMutedProviderSettings()
+        {
+            MutedProvidersPanel.Children.Clear();
+            _providerMuteControls.Clear();
+            var settings = QuotaAlertSettingsService.Current;
+            foreach (var item in ViewModel.Providers)
+            {
+                var checkBox = new CheckBox
+                {
+                    Content = item.DisplayName,
+                    IsChecked = settings.IsProviderMuted(item.Id),
+                    Tag = item,
+                };
+                AutomationProperties.SetName(checkBox, $"将 {item.DisplayName} 的通知设为静音");
+                checkBox.Checked += OnProviderMuteChanged;
+                checkBox.Unchecked += OnProviderMuteChanged;
+                _providerMuteControls[item.Id] = checkBox;
+                MutedProvidersPanel.Children.Add(checkBox);
             }
         }
 
@@ -278,6 +310,120 @@ namespace TaskbarQuota.Views
             WidgetSettingsService.ApplyHideWhenProviderUnfocused(HideWhenUnfocusedToggle.IsOn);
         }
 
+        private void OnColoredIconsToggled(object sender, RoutedEventArgs e)
+        {
+            IconColorsExpander.IsEnabled = ColoredIconsToggle.IsOn;
+            if (_isInitializing)
+                return;
+
+            WidgetSettingsService.ApplyMonochromeProviderIcons(!ColoredIconsToggle.IsOn);
+        }
+
+        private void RebuildIconColorSettings()
+        {
+            IconColorsExpander.IsEnabled = ColoredIconsToggle.IsOn;
+            IconColorsExpander.Items.Clear();
+            foreach (var item in ViewModel.Providers)
+                IconColorsExpander.Items.Add(BuildIconColorCard(item));
+        }
+
+        private static Windows.UI.Color ParseIconColor(string? hex)
+        {
+            if (hex is null || !WidgetSettingsService.TryNormalizeHexColor(hex, out var normalized))
+                return Microsoft.UI.Colors.White;
+
+            int rgb = int.Parse(normalized.Substring(1), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+            return Windows.UI.Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+        }
+
+        private static string ToHex(Windows.UI.Color color) => $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+
+        private CommunityToolkit.WinUI.Controls.SettingsCard BuildIconColorCard(ProviderSettingItemViewModel item)
+        {
+            // Providers with no configured color draw with the theme foreground (white on a dark taskbar).
+            // The swatch mirrors that so it never misrepresents what the widget shows.
+            Brush SwatchBrush() => WidgetSettingsService.GetConfiguredProviderIconColorHex(item.Id) is { } hex
+                ? new SolidColorBrush(ParseIconColor(hex))
+                : (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+
+            var swatch = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(4),
+                Background = SwatchBrush(),
+                BorderBrush = (Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"],
+                BorderThickness = new Thickness(1),
+            };
+
+            var picker = new ColorPicker
+            {
+                IsAlphaEnabled = false,
+                IsHexInputVisible = true,
+                IsMoreButtonVisible = true,
+                Color = ParseIconColor(WidgetSettingsService.GetConfiguredProviderIconColorHex(item.Id)),
+            };
+            // Only a color the user actually picked is saved. Providers without a color start the picker
+            // at white as a placeholder, and saving that would turn "theme foreground" into a fixed white.
+            bool userChanged = false;
+            bool settingColor = false;
+            picker.ColorChanged += (_, args) =>
+            {
+                swatch.Background = new SolidColorBrush(args.NewColor);
+                if (!settingColor)
+                    userChanged = true;
+            };
+
+            var resetButton = new Button { Content = UiText.Get("Reset to default"), HorizontalAlignment = HorizontalAlignment.Left };
+            AutomationProperties.SetName(resetButton, $"重置 {item.DisplayName} 的图标颜色");
+
+            var flyoutContent = new StackPanel { Spacing = 8 };
+            flyoutContent.Children.Add(picker);
+            flyoutContent.Children.Add(resetButton);
+            var flyout = new Flyout { Content = flyoutContent };
+
+            // Persist once on close rather than on every drag tick, which would rewrite the settings file
+            // and re-render every widget continuously.
+            flyout.Closed += (_, _) =>
+            {
+                if (userChanged)
+                {
+                    string hex = ToHex(picker.Color);
+                    if (WidgetSettingsService.GetConfiguredProviderIconColorHex(item.Id) != hex)
+                        WidgetSettingsService.SetProviderIconColor(item.Id, hex);
+                }
+                userChanged = false;
+                swatch.Background = SwatchBrush();
+            };
+            resetButton.Click += (_, _) =>
+            {
+                WidgetSettingsService.ResetProviderIconColor(item.Id);
+                settingColor = true;
+                try
+                {
+                    picker.Color = ParseIconColor(WidgetSettingsService.GetConfiguredProviderIconColorHex(item.Id));
+                }
+                finally
+                {
+                    settingColor = false;
+                }
+                // Hide() raises Closed; the reset must not be overwritten by a save there.
+                userChanged = false;
+                swatch.Background = SwatchBrush();
+                flyout.Hide();
+            };
+
+            var swatchButton = new Button { Content = swatch, Flyout = flyout, Padding = new Thickness(8, 6, 8, 6) };
+            AutomationProperties.SetName(swatchButton, $"{item.DisplayName} 图标颜色");
+            AutomationProperties.SetAutomationId(swatchButton, $"IconColor_{item.Id}");
+
+            return new CommunityToolkit.WinUI.Controls.SettingsCard
+            {
+                Header = item.DisplayName,
+                Content = swatchButton,
+            };
+        }
+
         private void OnProviderDashboardToggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing || _suppressProviderToggleEvents)
@@ -315,7 +461,10 @@ namespace TaskbarQuota.Views
                 return;
             }
 
-            if (option.IsPinned && !item.IsPinned && !PinBudgetService.CanPin(item.Id, out var reason))
+            string? prospectiveDisplay = option.MatchesAnyDestination
+                ? WidgetSettingsService.GetPinnedProviderDisplay(item.Id)
+                : string.IsNullOrWhiteSpace(option.DisplayKey) ? null : option.DisplayKey;
+            if (option.IsPinned && !PinBudgetService.CanPin(item.Id, prospectiveDisplay, out var reason))
             {
                 PinBlockedBar.Message = reason;
                 PinBlockedBar.IsOpen = true;
@@ -348,7 +497,7 @@ namespace TaskbarQuota.Views
 
         private void OnWidgetSurfaceChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isInitializing)
+            if (_isInitializing || _suppressSurfaceEvents)
                 return;
 
             if (WidgetSurfaceCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
@@ -357,7 +506,7 @@ namespace TaskbarQuota.Views
                     ? WidgetSurfaceMode.Floating
                     : WidgetSurfaceMode.Taskbar;
                 WidgetSettingsService.ApplySurface(mode);
-                FloatingOpacityCard.IsEnabled = mode == WidgetSurfaceMode.Floating;
+                SetFloatingCardsEnabled(mode == WidgetSurfaceMode.Floating);
                 TaskbarPlacementCard.IsEnabled = mode == WidgetSurfaceMode.Taskbar;
             }
         }
@@ -401,36 +550,31 @@ namespace TaskbarQuota.Views
                 AddTaskbarPlacementOption(new("所有屏幕", TaskbarPlacementMode.AllDisplays));
 
                 var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-                if (TaskbarWindowTarget.TryFindAll(out var targets))
-                {
-                    foreach (var target in targets
-                        .OrderBy(target => target.DisplayNumber == 0 ? int.MaxValue : target.DisplayNumber)
-                        .ThenByDescending(target => target.IsPrimary))
-                    {
-                        if (!seen.Add(target.DisplayKey))
-                            continue;
+                IReadOnlyList<TaskbarWindowTarget> targets = System.Array.Empty<TaskbarWindowTarget>();
+                if (TaskbarWindowTarget.TryFindAll(out var found))
+                    targets = found;
 
-                        string screenName = target.DisplayNumber > 0
-                            ? $"屏幕 {target.DisplayNumber}"
-                            : "检测到的屏幕";
-                        if (target.IsPrimary)
-                            screenName += "（主屏幕）";
-                        AddTaskbarPlacementOption(new(
-                            screenName,
-                            TaskbarPlacementMode.SelectedDisplay,
-                            target.DisplayKey));
-                    }
-                }
+                var identities = new List<DisplayIdentity>(targets.Count);
+                foreach (var target in targets)
+                    identities.Add(target.ToIdentity());
 
                 string selectedKey = WidgetSettingsService.SelectedTaskbarDisplayKey;
-                if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay
-                    && selectedKey.Length > 0
-                    && seen.Add(selectedKey))
+                // The manager owns persistence after topology settles; this scan is only for labels.
+                if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay)
                 {
+                    selectedKey = TaskbarWindowTarget.ResolvePersistedDisplayKey(selectedKey, identities);
+                }
+
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    var target = targets[i];
+                    if (!seen.Add(target.DisplayKey))
+                        continue;
+
                     AddTaskbarPlacementOption(new(
-                        $"{selectedKey}（已断开）",
+                        TaskbarWindowTarget.FormatScreenLabel(i + 1, target.IsPrimary),
                         TaskbarPlacementMode.SelectedDisplay,
-                        selectedKey));
+                        target.DisplayKey));
                 }
 
                 AddTaskbarPlacementOption(new("自适应（跟随每个智能体）", TaskbarPlacementMode.Adaptive));
@@ -463,6 +607,7 @@ namespace TaskbarQuota.Views
         private void BuildPinOptions()
         {
             _pinOptions.Clear();
+            _pinDisplayIdentities = [];
             _pinOptions.Add(new("未固定", false));
 
             if (WidgetSettingsService.CurrentTaskbarPlacement != TaskbarPlacementMode.Adaptive)
@@ -477,32 +622,28 @@ namespace TaskbarQuota.Views
                 return;
             }
 
-            var displays = targets
-                .GroupBy(target => target.DisplayKey, System.StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .OrderBy(target => target.DisplayNumber == 0 ? int.MaxValue : target.DisplayNumber)
-                .ThenByDescending(target => target.IsPrimary)
-                .ToList();
+            var displays = TaskbarWindowTarget.OrderForDisplay(
+                targets
+                    .GroupBy(target => target.DisplayKey, System.StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First()));
             if (displays.Count < 2)
             {
                 _pinOptions.Add(new(UiText.Get("Pinned"), true, MatchesAnyDestination: true));
                 return;
-
             }
 
+            var identities = displays.Select(target => target.ToIdentity()).ToList();
+            _pinDisplayIdentities = identities;
             _pinOptions.Add(new("已固定 — 跟随应用", true));
             _pinOptions.Add(new(
                 "已固定 — 所有屏幕",
                 true,
                 WidgetSettingsService.AllDisplaysPinDestination));
 
-            foreach (var target in displays)
+            for (int i = 0; i < displays.Count; i++)
             {
-                string screenName = target.DisplayNumber > 0
-                    ? $"屏幕 {target.DisplayNumber}"
-                    : "检测到的屏幕";
-                if (target.IsPrimary)
-                    screenName += "（主屏幕）";
+                var target = displays[i];
+                string screenName = TaskbarWindowTarget.FormatScreenLabel(i + 1, target.IsPrimary);
                 _pinOptions.Add(new($"已固定 — {screenName}", true, target.DisplayKey));
             }
 
@@ -511,14 +652,18 @@ namespace TaskbarQuota.Views
             foreach (ProviderId provider in System.Enum.GetValues<ProviderId>())
             {
                 string? saved = WidgetSettingsService.GetPinnedProviderDisplay(provider);
-                if (saved is not null
-                    && saved != WidgetSettingsService.AllDisplaysPinDestination
-                    && known.Add(saved))
-                    _pinOptions.Add(new($"已固定 — {saved}（已断开）", true, saved));
+                if (saved is null || saved == WidgetSettingsService.AllDisplaysPinDestination)
+                    continue;
+
+                string resolved = TaskbarWindowTarget.ResolvePersistedDisplayKey(saved, identities);
+                if (!known.Add(resolved))
+                    continue;
+
+                _pinOptions.Add(new("已固定 — 之前选择的屏幕（不可用）", true, saved));
             }
         }
 
-        private static bool PinOptionMatches(ProviderId provider, PinOption option)
+        private bool PinOptionMatches(ProviderId provider, PinOption option)
         {
             bool pinned = WidgetSettingsService.IsProviderPinned(provider);
             if (pinned != option.IsPinned)
@@ -529,6 +674,7 @@ namespace TaskbarQuota.Views
                 return true;
 
             string selected = WidgetSettingsService.GetPinnedProviderDisplay(provider) ?? string.Empty;
+            selected = TaskbarWindowTarget.ResolvePersistedDisplayKey(selected, _pinDisplayIdentities);
             return string.Equals(selected, option.DisplayKey, System.StringComparison.OrdinalIgnoreCase);
         }
 
@@ -591,6 +737,117 @@ namespace TaskbarQuota.Views
             WidgetSettingsService.ApplyFloatingOpacity(percent / 100d);
         }
 
+        private void SetFloatingCardsEnabled(bool floating)
+        {
+            FloatingOpacityCard.IsEnabled = floating;
+            FloatingWindowOpacityCard.IsEnabled = floating;
+            FloatingClickThroughCard.IsEnabled = floating;
+        }
+
+        private void BuildFloatingWindowOpacitySlider()
+        {
+            if (_floatingWindowOpacitySlider is not null)
+                return;
+
+            int min = (int)System.Math.Round(WidgetSettingsService.FloatingWindowOpacityMin * 100);
+            var slider = new Slider
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                StepFrequency = 5,
+            };
+            slider.Maximum = 100;
+            slider.Minimum = min;
+            slider.Value = System.Math.Clamp(
+                System.Math.Round(WidgetSettingsService.FloatingWindowOpacity * 100),
+                min,
+                100);
+            AutomationProperties.SetName(slider, UiText.Get("Floating window opacity"));
+            AutomationProperties.SetAutomationId(slider, "SettingsFloatingWindowOpacitySlider");
+            slider.ValueChanged += OnFloatingWindowOpacityChanged;
+
+            FloatingWindowOpacitySliderHost.Children.Clear();
+            FloatingWindowOpacitySliderHost.Children.Add(slider);
+            _floatingWindowOpacitySlider = slider;
+        }
+
+        private void OnFloatingWindowOpacityChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            if (_isInitializing)
+                return;
+
+            int percent = (int)System.Math.Round(e.NewValue);
+            FloatingWindowOpacityLabel.Text = $"{percent}%";
+            WidgetSettingsService.ApplyFloatingWindowOpacity(percent / 100d);
+        }
+
+        private void OnFloatingClickThroughToggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing)
+                return;
+
+            WidgetSettingsService.ApplyFloatingClickThrough(FloatingClickThroughToggle.IsOn);
+        }
+
+        private void OnWidgetSettingsChanged(object? sender, System.EventArgs e)
+            => DispatcherQueue.TryEnqueue(() =>
+            {
+                // Writing back the current value re-applies the same setting, which the Apply* methods
+                // ignore — no feedback loop with the slider/toggle change handlers.
+                if (FloatingClickThroughToggle.IsOn != WidgetSettingsService.FloatingClickThrough)
+                    FloatingClickThroughToggle.IsOn = WidgetSettingsService.FloatingClickThrough;
+
+                // The floating HUD's wheel gestures change these while the page may be open.
+                SyncSlider(_floatingOpacitySlider, FloatingOpacityLabel, WidgetSettingsService.FloatingOpacity);
+                SyncSlider(_floatingWindowOpacitySlider, FloatingWindowOpacityLabel, WidgetSettingsService.FloatingWindowOpacity);
+
+                // Right-clicking the HUD or the flyout's surface button can switch surfaces while open.
+                SyncSurface(WidgetSettingsService.CurrentSurface);
+
+                bool wasInitializing = _isInitializing;
+                _isInitializing = true;
+                try
+                {
+                    AutoHideUnavailableToggle.IsOn = WidgetSettingsService.AutoHideUnavailable;
+                    ViewModel.RefreshProviderVisibility();
+                    foreach (var item in ViewModel.Providers)
+                        RefreshProviderRow(item);
+                }
+                finally
+                {
+                    _isInitializing = wasInitializing;
+                }
+            });
+
+        private void SyncSurface(WidgetSurfaceMode surface)
+        {
+            bool floating = surface == WidgetSurfaceMode.Floating;
+            int index = floating ? 1 : 0;
+            if (WidgetSurfaceCombo.SelectedIndex != index)
+            {
+                _suppressSurfaceEvents = true;
+                try
+                {
+                    WidgetSurfaceCombo.SelectedIndex = index;
+                }
+                finally
+                {
+                    _suppressSurfaceEvents = false;
+                }
+            }
+
+            SetFloatingCardsEnabled(floating);
+            TaskbarPlacementCard.IsEnabled = !floating;
+        }
+
+        private static void SyncSlider(Slider? slider, TextBlock label, double value)
+        {
+            int percent = (int)System.Math.Round(value * 100);
+            if (slider is not null && (int)System.Math.Round(slider.Value) != percent)
+                slider.Value = percent;
+            label.Text = $"{percent}%";
+        }
+
         private void OnWidgetModeChanged(object sender, SelectionChangedEventArgs e)
         {
             if (WidgetModeCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
@@ -605,12 +862,57 @@ namespace TaskbarQuota.Views
             }
         }
 
-        private void OnStartupToggled(object sender, RoutedEventArgs e)
+        private async void OnStartupToggled(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing)
+            if (_isInitializing || _updatingStartupToggle)
                 return;
 
-            StartupSettingsService.Apply(StartupToggle.IsOn);
+            _updatingStartupToggle = true;
+            StartupToggle.IsEnabled = false;
+            try
+            {
+                await StartupSettingsService.ApplyAsync(StartupToggle.IsOn);
+                await RefreshStartupToggleAsync();
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warning(ex, "Could not change startup registration");
+                await RefreshStartupToggleAsync();
+            }
+            finally
+            {
+                _updatingStartupToggle = false;
+                StartupToggle.IsEnabled = true;
+            }
+        }
+
+        private async System.Threading.Tasks.Task RefreshStartupToggleAsync()
+        {
+            _updatingStartupToggle = true;
+            StartupToggle.IsEnabled = false;
+            try
+            {
+                var status = await StartupSettingsService.ReadStatusAsync();
+                StartupToggle.IsOn = status.IsEnabled;
+                var guidance = new List<string>();
+                if (status.DisabledByUser)
+                    guidance.Add("Windows 已禁用此启动项。请在“Windows 设置 > 应用 > 启动”中重新启用 TaskbarQuota。");
+                if (status.HasOlderInstallerStartup)
+                    guidance.Add("检测到旧版 TaskbarQuota 也设置了开机启动。请禁用旧版启动项或卸载旧版，以避免同时出现两个小组件。");
+                StartupHelpText.Text = string.Join(" ", guidance);
+                StartupHelpText.Visibility = guidance.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warning(ex, "Could not read startup registration");
+                StartupToggle.IsOn = false;
+                StartupHelpText.Visibility = Visibility.Collapsed;
+            }
+            finally
+            {
+                _updatingStartupToggle = false;
+                StartupToggle.IsEnabled = true;
+            }
         }
 
         private void OnPercentageModeChanged(object sender, SelectionChangedEventArgs e)
@@ -650,6 +952,15 @@ namespace TaskbarQuota.Views
 
             QuotaAlertSettingsService.SetReplenishmentEnabled(QuotaReplenishmentToggle.IsOn);
             ApplyQuotaAlertSettingsToControls();
+        }
+
+        private void OnProviderMuteChanged(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing || _suppressProviderMuteEvents
+                || sender is not CheckBox { Tag: ProviderSettingItemViewModel item } checkBox)
+                return;
+
+            QuotaAlertSettingsService.SetProviderMuted(item.Id, checkBox.IsChecked == true);
         }
 
         private void OnCrossSessionReplenishmentToggled(object sender, RoutedEventArgs e)
@@ -701,6 +1012,17 @@ namespace TaskbarQuota.Views
                 WarningThresholdBox.Value = settings.WarningThreshold;
                 CriticalThresholdBox.Value = settings.CriticalThreshold;
                 AlertCooldownBox.Value = settings.CooldownMinutes;
+
+                _suppressProviderMuteEvents = true;
+                try
+                {
+                    foreach (var item in _providerMuteControls)
+                        item.Value.IsChecked = settings.IsProviderMuted(item.Key);
+                }
+                finally
+                {
+                    _suppressProviderMuteEvents = false;
+                }
             }
             finally
             {

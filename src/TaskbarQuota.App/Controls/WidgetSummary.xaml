@@ -38,14 +38,19 @@
                 <Border x:Name="HostBadgeBox" Visibility="Collapsed"
                         Width="13" Height="13" CornerRadius="6.5"
                         Padding="1.5"
-                        HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+                        HorizontalAlignment="Right" VerticalAlignment="Bottom">
                     <Viewbox HorizontalAlignment="Center" VerticalAlignment="Center">
                         <Canvas Width="100" Height="100">
                             <Path x:Name="HostBadgeGlyph"/>
                         </Canvas>
                     </Viewbox>
                 </Border>
+
+                <!-- Agent activity dot: used instead of tinting the glyph when provider icon colors are on,
+                     so the provider color stays readable while an agent is working. -->
+                <Ellipse x:Name="ActivityDot" Visibility="Collapsed"
+                         Width="9" Height="9" StrokeThickness="1.5"
+                         HorizontalAlignment="Right" VerticalAlignment="Top"/>
             </Grid>
         </Grid>
     </Grid>

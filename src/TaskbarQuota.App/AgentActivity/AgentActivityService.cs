@@ -17,12 +17,22 @@ public sealed class AgentActivityService
     public static AgentActivityService Instance { get; } = new();
 
     internal static readonly TimeSpan CompletedRetention = TimeSpan.FromMinutes(10);
+    // Idle sessions whose process stays open (desktop apps, parked terminals) would otherwise linger for
+    // hours. They come back as soon as the session reports new activity.
+    internal static readonly TimeSpan IdleRetention = TimeSpan.FromMinutes(15);
     private const int MaxRetainedItems = 100;
 
     private readonly object _gate = new();
     private readonly Dictionary<string, AgentActivityItem> _items = new(StringComparer.Ordinal);
     private readonly HashSet<string> _acknowledged = new(StringComparer.Ordinal);
     private readonly HashSet<string> _scannedIds = new(StringComparer.Ordinal);
+    // Rows the user dismissed from the flyout, keyed by the UpdatedAt they had at dismissal. Scanner rows
+    // come back every tick, so a dismissal holds until the session reports newer or actively-working activity.
+    private readonly Dictionary<string, DateTimeOffset> _dismissed = new(StringComparer.Ordinal);
+    // Transcripts carry no transition timestamp for active states, so Working/Waiting date from when this
+    // service first saw them. Settled states date from the item's last activity instead.
+    private readonly Dictionary<string, (AgentActivityStatus Status, DateTimeOffset Since)> _activeSince =
+        new(StringComparer.Ordinal);
     // A run is the set of threads that were alive together. Completed members stay here until the
     // remaining members finish, allowing the taskbar to advance through concurrent project agents.
     private readonly HashSet<string> _runIds = new(StringComparer.Ordinal);
@@ -82,6 +92,8 @@ public sealed class AgentActivityService
             {
                 _items.Remove(missingId);
                 _acknowledged.Remove(missingId);
+                _dismissed.Remove(missingId);
+                _activeSince.Remove(missingId);
                 _runIds.Remove(missingId);
             }
 
@@ -89,8 +101,17 @@ public sealed class AgentActivityService
             foreach (var id in nextScannedIds)
                 _scannedIds.Add(id);
 
-            bool trackedRunIsLive = _runIds.Any(id => _items.TryGetValue(id, out var existing) && existing.IsLive);
-            var scannedLive = scanned.Where(item => item.IsLive).Select(item => item.Id).ToArray();
+            foreach (var item in scanned)
+                ReleaseDismissalOnNewActivity(item);
+
+            var now = DateTimeOffset.Now;
+            var idleCutoff = now - IdleRetention;
+            bool trackedRunIsLive = _runIds.Any(id => _items.TryGetValue(id, out var existing) && existing.IsLive
+                && !_dismissed.ContainsKey(id));
+            var scannedLive = scanned
+                .Where(item => item.IsLive && !_dismissed.ContainsKey(item.Id) && !IsExpiredIdle(item, idleCutoff))
+                .Select(item => item.Id)
+                .ToArray();
             if (scannedLive.Length > 0 && !trackedRunIsLive && _runIds.Count > 0)
                 _runIds.Clear();
             foreach (var id in scannedLive)
@@ -100,18 +121,20 @@ public sealed class AgentActivityService
                 if (scanned.Any(item => item.IsLive && _items[key].Provider == item.Provider))
                     RemoveItem(key);
 
-            var completionCutoff = DateTimeOffset.Now - CompletedRetention;
+            var completionCutoff = now - CompletedRetention;
             foreach (var item in scanned)
             {
                 if (item.IsLive)
                     _acknowledged.Remove(item.Id);
-                if (item.IsLive || item.UpdatedAt >= completionCutoff)
-                    _items[item.Id] = item;
+                if (IsExpiredIdle(item, idleCutoff))
+                    RemoveItem(item.Id);
+                else if (item.IsLive || item.UpdatedAt >= completionCutoff)
+                    _items[item.Id] = WithStatusSince(item, now);
                 else
-                    _items.Remove(item.Id);
+                    RemoveItem(item.Id);
             }
 
-            Prune(completionCutoff);
+            Prune(completionCutoff, idleCutoff);
             var after = BuildSnapshot();
             if (!SnapshotsEqual(before, after))
             {
@@ -144,25 +167,26 @@ public sealed class AgentActivityService
         {
             if (isPresent)
             {
+                var now = DateTimeOffset.Now;
                 if (_items.TryGetValue(key, out var existing) && existing.IsLive)
                 {
-                    _items[key] = existing with { UpdatedAt = DateTimeOffset.Now };
+                    _items[key] = WithStatusSince(existing with { UpdatedAt = now }, now);
                 }
                 else
                 {
-                    _items[key] = new AgentActivityItem(
-                        key, id, DisplayName(id), "Working", AgentActivityStatus.Working,
-                        DateTimeOffset.Now, DateTimeOffset.Now);
+                    _items[key] = WithStatusSince(new AgentActivityItem(
+                        key, id, DisplayName(id), "Working", AgentActivityStatus.Working, now, now), now);
                 }
             }
             else if (_items.TryGetValue(key, out var previous) && previous.IsLive)
             {
-                _items[key] = previous with
+                var now = DateTimeOffset.Now;
+                _items[key] = WithStatusSince(previous with
                 {
                     Step = "Finished",
                     Status = AgentActivityStatus.Completed,
-                    UpdatedAt = DateTimeOffset.Now,
-                };
+                    UpdatedAt = now,
+                }, now);
             }
 
             snapshot = BuildSnapshot();
@@ -179,11 +203,12 @@ public sealed class AgentActivityService
         lock (_gate)
         {
             var now = DateTimeOffset.Now;
-            _items[id] = new AgentActivityItem(
-                id, provider, title, step, status, startedAt ?? now, now, subagentCount, detail);
+            _items[id] = WithStatusSince(new AgentActivityItem(
+                id, provider, title, step, status, startedAt ?? now, now, subagentCount, detail), now);
             if (status is AgentActivityStatus.Working or AgentActivityStatus.Waiting)
                 _acknowledged.Remove(id);
-            Prune(DateTimeOffset.Now - CompletedRetention);
+            ReleaseDismissalOnNewActivity(_items[id]);
+            Prune(now - CompletedRetention, now - IdleRetention);
             snapshot = BuildSnapshot();
             handlers = Changed;
         }
@@ -196,6 +221,29 @@ public sealed class AgentActivityService
         Action<AgentActivitySnapshot>? handlers;
         lock (_gate)
         {
+            _acknowledged.Add(id);
+            _runIds.Remove(id);
+            snapshot = BuildSnapshot();
+            handlers = Changed;
+        }
+        Publish(handlers, snapshot);
+    }
+
+    /// <summary>
+    /// Hides one row from the flyout and taskbar summary, including live (e.g. idle) sessions. The row stays
+    /// hidden across scans until the session reports a newer UpdatedAt or a Working/Waiting status.
+    /// </summary>
+    public void Dismiss(string id)
+    {
+        AgentActivitySnapshot snapshot;
+        Action<AgentActivitySnapshot>? handlers;
+        lock (_gate)
+        {
+            // A stale card can still expose dismiss after its session resumed; never hide active work.
+            if (!_items.TryGetValue(id, out var item)
+                || item.Status is AgentActivityStatus.Working or AgentActivityStatus.Waiting)
+                return;
+            _dismissed[id] = item.UpdatedAt;
             _acknowledged.Add(id);
             _runIds.Remove(id);
             snapshot = BuildSnapshot();
@@ -230,6 +278,8 @@ public sealed class AgentActivityService
         {
             _items.Clear();
             _acknowledged.Clear();
+            _dismissed.Clear();
+            _activeSince.Clear();
             _scannedIds.Clear();
             _runIds.Clear();
             snapshot = BuildSnapshot();
@@ -241,6 +291,7 @@ public sealed class AgentActivityService
     private AgentActivitySnapshot BuildSnapshot()
     {
         var items = _items.Values
+            .Where(item => !_dismissed.ContainsKey(item.Id))
             .Where(item => item.IsLive || !_acknowledged.Contains(item.Id))
             .OrderByDescending(item => item.IsLive)
             .ThenByDescending(item => item.UpdatedAt)
@@ -252,10 +303,10 @@ public sealed class AgentActivityService
         return new AgentActivitySnapshot(items, runItems);
     }
 
-    private void Prune(DateTimeOffset completionCutoff)
+    private void Prune(DateTimeOffset completionCutoff, DateTimeOffset idleCutoff)
     {
         foreach (var id in _items.Values
-                     .Where(item => !item.IsLive && item.UpdatedAt < completionCutoff)
+                     .Where(item => (!item.IsLive && item.UpdatedAt < completionCutoff) || IsExpiredIdle(item, idleCutoff))
                      .Select(item => item.Id)
                      .ToArray())
             RemoveItem(id);
@@ -269,13 +320,46 @@ public sealed class AgentActivityService
             RemoveItem(id);
 
         _acknowledged.RemoveWhere(id => !_items.ContainsKey(id) && !_scannedIds.Contains(id));
+        foreach (var id in _dismissed.Keys.Where(id => !_items.ContainsKey(id) && !_scannedIds.Contains(id)).ToArray())
+            _dismissed.Remove(id);
         _runIds.RemoveWhere(id => !_items.ContainsKey(id));
+    }
+
+    private static bool IsExpiredIdle(AgentActivityItem item, DateTimeOffset idleCutoff)
+        => item.Status == AgentActivityStatus.Idle && !item.ActionPending && item.UpdatedAt < idleCutoff;
+
+    private AgentActivityItem WithStatusSince(AgentActivityItem item, DateTimeOffset now)
+    {
+        if (item.Status is not (AgentActivityStatus.Working or AgentActivityStatus.Waiting))
+        {
+            _activeSince.Remove(item.Id);
+            return item with { StatusSince = item.UpdatedAt };
+        }
+
+        if (!_activeSince.TryGetValue(item.Id, out var tracked) || tracked.Status != item.Status)
+        {
+            tracked = (item.Status, now);
+            _activeSince[item.Id] = tracked;
+        }
+        return item with { StatusSince = tracked.Since };
+    }
+
+    private void ReleaseDismissalOnNewActivity(AgentActivityItem item)
+    {
+        if (!_dismissed.TryGetValue(item.Id, out var dismissedAt))
+            return;
+        if (item.UpdatedAt > dismissedAt || item.Status is AgentActivityStatus.Working or AgentActivityStatus.Waiting)
+        {
+            _dismissed.Remove(item.Id);
+            _acknowledged.Remove(item.Id);
+        }
     }
 
     private void RemoveItem(string id)
     {
         _items.Remove(id);
         _runIds.Remove(id);
+        _activeSince.Remove(id);
     }
 
     private static bool SnapshotsEqual(AgentActivitySnapshot left, AgentActivitySnapshot right)

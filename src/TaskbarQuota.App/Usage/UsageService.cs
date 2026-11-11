@@ -20,6 +20,7 @@ namespace TaskbarQuota.Usage
         private readonly Dictionary<ProviderId, UsageResult> _lastSuccessfulLiveResults = new();
         private readonly object _lock = new();
         private readonly string? _snapshotDirectory;
+        private readonly Action<UsageResult>? _fetchObserver;
         private long _nextObservationSequence;
 
         // How long a persisted snapshot may keep its original timestamp while the usage values are
@@ -34,9 +35,14 @@ namespace TaskbarQuota.Usage
         /// Where the last-good snapshots are persisted so the widget can render real numbers at boot
         /// (issue #21). Null disables persistence — the default, so tests never touch %LOCALAPPDATA%.
         /// </param>
-        public UsageService(string? snapshotDirectory = null)
+        /// <param name="fetchObserver">
+        /// Optional bookkeeping for actual provider attempts, before cache/history fallback. Cache reads,
+        /// restored snapshots and caller cancellation do not notify it; observer failures are isolated.
+        /// </param>
+        public UsageService(string? snapshotDirectory = null, Action<UsageResult>? fetchObserver = null)
         {
             _snapshotDirectory = snapshotDirectory;
+            _fetchObserver = fetchObserver;
             Register(new CodexProvider());
             Register(new CopilotProvider());
             Register(new ClaudeProvider());
@@ -84,22 +90,30 @@ namespace TaskbarQuota.Usage
             return false;
         }
 
-        public async Task<UsageResult> FetchAsync(ProviderId id, bool force = false, CancellationToken ct = default)
+        // Callers include UI-thread timers, and the cache-hit path can parse session history for seconds.
+        public Task<UsageResult> FetchAsync(ProviderId id, bool force = false, CancellationToken ct = default)
+            => Task.Run(() => FetchCoreAsync(id, force, ct), CancellationToken.None);
+
+        private async Task<UsageResult> FetchCoreAsync(ProviderId id, bool force, CancellationToken ct)
         {
             if (!_providers.TryGetValue(id, out var provider))
                 return UsageResult.Failure(id, "服务暂不可用。");
 
+            UsageResult? cachedResult = null;
             lock (_lock)
             {
                 if (!force && TryGetValidEntry(id, out var cached))
-                    return AttachLocalHistory(id, cached.Result.AsMemoryCache());
+                    cachedResult = cached.Result.AsMemoryCache();
             }
+            // History parsing reads every session log, so it runs outside _lock to keep UI-thread cache reads unblocked.
+            if (cachedResult is not null)
+                return AttachLocalHistory(id, cachedResult);
 
             var observationSequence = Interlocked.Increment(ref _nextObservationSequence);
             try
             {
-                var fetch = await provider.FetchUsageAsync(ct).ConfigureAwait(false);
-                if (UsageHistoryService.TryLoad(id, out var history))
+                var fetch = await FetchProviderAsync(provider, ct).ConfigureAwait(false);
+                if (fetch.Usage.UsageHistory is null && UsageHistoryService.TryLoad(id, out var history))
                     fetch.Usage.UsageHistory = history;
                 var observedAt = DateTimeOffset.Now;
                 var result = UsageResult.Success(id, provider, fetch)
@@ -165,6 +179,44 @@ namespace TaskbarQuota.Usage
                 var result = UsageResult.Failure(id, "获取用量失败，请稍后重试。", provider);
                 Store(id, result, FetchCachePolicy.TtlForFailure(null));
                 return result;
+            }
+        }
+
+        private async Task<ProviderFetchResult> FetchProviderAsync(IUsageProvider provider, CancellationToken ct)
+        {
+            ProviderFetchResult fetch;
+            try
+            {
+                fetch = await provider.FetchUsageAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ProviderException ex)
+            {
+                NotifyFetchObserver(UsageResult.Failure(provider.Id, ex.Message, provider, ex.Kind));
+                throw;
+            }
+            catch (Exception ex)
+            {
+                NotifyFetchObserver(UsageResult.Failure(provider.Id, ex.Message, provider));
+                throw;
+            }
+
+            // Report the provider's actual outcome, before history/cache fallbacks can look successful.
+            // Cache hits and restored snapshots never enter this method.
+            NotifyFetchObserver(UsageResult.Success(provider.Id, provider, fetch));
+            return fetch;
+        }
+
+        private void NotifyFetchObserver(UsageResult result)
+        {
+            try { _fetchObserver?.Invoke(result); }
+            catch (Exception ex)
+            {
+                // Discovery is best effort; an observer must not change the usage result or retry a fetch.
+                Log.Warning(ex, "Provider fetch observer failed");
             }
         }
 
@@ -321,7 +373,7 @@ namespace TaskbarQuota.Usage
             if (result.Fetch?.Usage is not { } usage)
                 return result;
 
-            if (UsageHistoryService.TryLoad(id, out var history))
+            if (usage.UsageHistory is null && UsageHistoryService.TryLoad(id, out var history))
             {
                 usage.UsageHistory = history;
             }
@@ -407,6 +459,7 @@ namespace TaskbarQuota.Usage
                 (null, null) => true,
                 ({ } l, { } r) =>
                     NearlyEqual(l.UsedPercent, r.UsedPercent)
+                    && l.IsIncluded == r.IsIncluded
                     && l.WindowMinutes == r.WindowMinutes
                     && l.ResetAt == r.ResetAt
                     && l.ResetDescription == r.ResetDescription,

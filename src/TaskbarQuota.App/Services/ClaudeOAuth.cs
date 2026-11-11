@@ -45,6 +45,16 @@ namespace TaskbarQuota.Services
         private const string RedirectUri = "https://platform.claude.com/oauth/code/callback";
         private const string TokenUrl = "https://platform.claude.com/v1/oauth/token";
         private const string Scope = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+        // The token endpoint rejects a refresh that asks for org:create_api_key with invalid_scope, so a
+        // refresh requests the Claude Code set without it (as openusage and the CLI-credentials path do).
+        internal const string RefreshScope = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+        private static readonly TimeSpan RefreshBackoffBase = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan RefreshBackoffMax = TimeSpan.FromHours(6);
+        private static readonly object RefreshGateLock = new();
+        private static DateTimeOffset _refreshBlockedUntil;
+        private static int _refreshFailures;
+        // Refresh token the endpoint rejected for good (invalid_grant/invalid_scope); a new login replaces it.
+        private static string? _rejectedRefreshToken;
 
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
@@ -100,7 +110,7 @@ namespace TaskbarQuota.Services
         public static async Task<ClaudeTokens> CompleteLoginAsync(ClaudeLoginRequest request, string callbackOrCode, CancellationToken ct = default)
         {
             var code = ExtractCode(callbackOrCode)
-                ?? throw new InvalidOperationException("Paste the Claude authorization code or callback URL.");
+                ?? throw new InvalidOperationException("请粘贴 Claude 授权码或回调 URL。");
 
             var body = new Dictionary<string, string>
             {
@@ -118,7 +128,7 @@ namespace TaskbarQuota.Services
 
         /// <summary>Runs the interactive browser login. UI callers should prefer Create/Open/Complete.</summary>
         public static Task<ClaudeTokens> LoginAsync(CancellationToken ct = default)
-            => throw new InvalidOperationException("Claude login requires pasting the authorization code shown in the browser.");
+            => throw new InvalidOperationException("Claude 登录需要粘贴浏览器中显示的授权码。");
 
         /// <summary>Returns a valid (refreshed if needed) token, or null if not logged in / refresh failed.</summary>
         public static async Task<ClaudeTokens?> GetValidTokensAsync(CancellationToken ct = default)
@@ -127,6 +137,7 @@ namespace TaskbarQuota.Services
             if (tokens is null) return null;
             if (!tokens.IsExpired) return tokens;
             if (string.IsNullOrEmpty(tokens.RefreshToken)) return null;
+            if (!CanAttemptRefresh(tokens.RefreshToken!, DateTimeOffset.UtcNow)) return null;
 
             try
             {
@@ -135,16 +146,84 @@ namespace TaskbarQuota.Services
                     ["grant_type"] = "refresh_token",
                     ["client_id"] = ClientId,
                     ["refresh_token"] = tokens.RefreshToken!,
-                    ["scope"] = Scope,
+                    ["scope"] = RefreshScope,
                 };
                 var refreshed = await PostTokenAsync(body, fallbackRefresh: tokens.RefreshToken, ct).ConfigureAwait(false);
                 Save(refreshed);
+                RecordRefreshSuccess();
+                Log.Information("[claude-oauth] login token refreshed.");
                 return refreshed;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                Log.Debug($"[claude-oauth] refresh failed: {ex.Message}");
+                RecordRefreshFailure(tokens.RefreshToken!, ex.Message, DateTimeOffset.UtcNow);
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Refresh failures back off (5 min doubling to 6 h) instead of retrying on every poll, and a
+        /// refresh token the endpoint rejected outright is never retried; logging in again replaces it.
+        /// </summary>
+        internal static bool CanAttemptRefresh(string refreshToken, DateTimeOffset now)
+        {
+            lock (RefreshGateLock)
+            {
+                if (string.Equals(_rejectedRefreshToken, refreshToken, StringComparison.Ordinal))
+                    return false;
+                return now >= _refreshBlockedUntil;
+            }
+        }
+
+        internal static void RecordRefreshFailure(string refreshToken, string message, DateTimeOffset now)
+        {
+            lock (RefreshGateLock)
+            {
+                if (IsTerminalRefreshError(message))
+                {
+                    _rejectedRefreshToken = refreshToken;
+                    Log.Warning($"[claude-oauth] refresh rejected; Login with Claude again to restore it. {message}");
+                    return;
+                }
+
+                _refreshFailures++;
+                _refreshBlockedUntil = now + RefreshBackoff(_refreshFailures);
+                Log.Debug($"[claude-oauth] refresh failed ({_refreshFailures}x), next attempt after {_refreshBlockedUntil.ToLocalTime():HH:mm}: {message}");
+            }
+        }
+
+        private static void RecordRefreshSuccess()
+        {
+            lock (RefreshGateLock)
+            {
+                _refreshFailures = 0;
+                _refreshBlockedUntil = default;
+                _rejectedRefreshToken = null;
+            }
+        }
+
+        internal static bool IsTerminalRefreshError(string message)
+            => message.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("invalid_scope", StringComparison.OrdinalIgnoreCase);
+
+        internal static TimeSpan RefreshBackoff(int failures)
+        {
+            var factor = Math.Pow(2, Math.Clamp(failures - 1, 0, 10));
+            var backoff = TimeSpan.FromTicks((long)(RefreshBackoffBase.Ticks * factor));
+            return backoff < RefreshBackoffMax ? backoff : RefreshBackoffMax;
+        }
+
+        internal static void ResetRefreshGateForTesting()
+        {
+            lock (RefreshGateLock)
+            {
+                _refreshFailures = 0;
+                _refreshBlockedUntil = default;
+                _rejectedRefreshToken = null;
             }
         }
 
@@ -162,7 +241,7 @@ namespace TaskbarQuota.Services
             var root = doc.RootElement;
             string access = root.TryGetProperty("access_token", out var a) ? a.GetString() ?? "" : "";
             if (string.IsNullOrEmpty(access))
-                throw new InvalidOperationException("Claude token endpoint returned no access_token.");
+                throw new InvalidOperationException("Claude Token 接口未返回 access_token。");
             string? refresh = root.TryGetProperty("refresh_token", out var r) ? r.GetString() : fallbackRefresh;
             DateTimeOffset? expires = root.TryGetProperty("expires_in", out var e) && e.TryGetInt64(out var secs)
                 ? DateTimeOffset.UtcNow.AddSeconds(secs)

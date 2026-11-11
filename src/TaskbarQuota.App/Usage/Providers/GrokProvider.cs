@@ -54,7 +54,7 @@ namespace TaskbarQuota.Usage.Providers
 
             var primary = new RateWindow(
                 billing.UsedPercent,
-                windowMinutes: null,
+                windowMinutes: billing.IsWeekly ? QuotaWindowLength.Weekly : QuotaWindowLength.Monthly(billing.ResetAt),
                 resetAt: billing.ResetAt,
                 resetDescription: CodexProvider.FormatResetCountdown(billing.ResetAt),
                 label: billing.IsWeekly ? "Weekly" : null);

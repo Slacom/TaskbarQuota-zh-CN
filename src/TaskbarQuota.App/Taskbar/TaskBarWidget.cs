@@ -119,8 +119,8 @@ namespace TaskbarQuota.Taskbar
         private readonly Microsoft.UI.Xaml.Controls.TextBlock[] separators =
             new Microsoft.UI.Xaml.Controls.TextBlock[UsageCoordinator.MaxWidgetTiles - 1];
         private readonly ProviderId?[] tileProviders = new ProviderId?[UsageCoordinator.MaxWidgetTiles];
-        // Slot has a provider AND fits inside the measured taskbar gap. Trimming only ever drops from the
-        // right, so the leading (active) tile is the last one to go.
+        // Slot has a provider AND fits inside the measured taskbar gap. A pinned tile is never suppressed;
+        // the active tile is the courtesy tile that gives way when the pins fill the gap.
         private readonly bool[] tileFits = new bool[UsageCoordinator.MaxWidgetTiles];
         // Has a provider, but is being held back this pass because the row would otherwise overflow. Only
         // ever the active tool's tile when that provider is not pinned.
@@ -153,6 +153,7 @@ namespace TaskbarQuota.Taskbar
         private DesktopWindowXamlSource? host;
         private DesktopWindowXamlSource? activityHost;
         private Microsoft.UI.Xaml.FrameworkElement? hostContent;
+        private Microsoft.UI.Dispatching.DispatcherQueue? widgetDispatcher;
         private Microsoft.UI.Xaml.FrameworkElement? activityHostContent;
         // Show/hide cross-fade state. Short on purpose: the widget lives on the taskbar, so anything
         // slower reads as lag rather than as a transition.
@@ -279,6 +280,10 @@ namespace TaskbarQuota.Taskbar
                 || (isPrimaryTaskbar && (hwndTrayNotify == IntPtr.Zero || hwndReBar == IntPtr.Zero)))
                 throw new InvalidOperationException("Windows taskbar is not ready.");
 
+            // Register the identity before the first layout pass. A widget whose geometry is temporarily
+            // unavailable is still a relevant display, but its zero width must remain permissive.
+            TaskbarSpace.ReportAvailableWidth(displayKey, TaskbarSpace.UnknownWidth, isPrimaryTaskbar);
+
             uint detectedDpi = User32.GetDpiForWindow(hwndShell);
             taskbarDpi = detectedDpi == 0 ? 96u : detectedDpi;
             dpiScale = taskbarDpi / 96d;
@@ -328,6 +333,7 @@ namespace TaskbarQuota.Taskbar
                 RenderTransform = new Microsoft.UI.Xaml.Media.CompositeTransform(),
             };
             host.Content = hostContent;
+            widgetDispatcher = hostContent.DispatcherQueue;
             ResizeWidgetHost(WidgetWidthForMode(WidgetSettingsService.Current));
 
             InitializeActivityHost(taskbarRect);
@@ -531,6 +537,7 @@ namespace TaskbarQuota.Taskbar
             lastWidgetsButtonClientRect = null;
             lastTaskButtonClientRects.Clear();
             availableLogicalWidth = DefaultAvailableLogicalWidth;
+            TaskbarSpace.ReportAvailableWidth(displayKey, TaskbarSpace.UnknownWidth, isPrimaryTaskbar);
             Log.Information(
                 $"Taskbar widget DPI updated in place: taskbar=0x{hwndShell.ToInt64():X}, {previousDpi}->{newDpi}, source={source}");
             RecomputeLayout(forceReposition: true);
@@ -615,51 +622,74 @@ namespace TaskbarQuota.Taskbar
         {
             if (hostContent is not { } content)
             {
-                completed?.Invoke();
+                InvokeAnimationCompletion(completed);
                 return;
             }
 
-            hostFadeStoryboard?.Stop();
-
-            double from = content.Opacity;
-
-            // When hiding (to == 0) we always run the storyboard, even if the content is already
-            // near-transparent: skipping it would call the completion immediately, which hides the
-            // window without any animation and is the "instant disappear" the user saw.
-            // When showing (to == 1) skip is fine — nothing to animate if we're already opaque.
-            bool skip = Math.Abs(from - to) < 0.01 && to > 0.5;
-            if (skip)
+            try
             {
+                hostFadeStoryboard?.Stop();
+
+                double from = content.Opacity;
+
+                // When hiding (to == 0) we always run the storyboard, even if the content is already
+                // near-transparent: skipping it would call the completion immediately, which hides the
+                // window without any animation and is the "instant disappear" the user saw.
+                // When showing (to == 1) skip is fine — nothing to animate if we're already opaque.
+                bool skip = Math.Abs(from - to) < 0.01 && to > 0.5;
+                if (skip)
+                {
+                    content.Opacity = to;
+                    InvokeAnimationCompletion(completed);
+                    return;
+                }
+
+                // Park the local value at the destination and let the animation supply the start through From,
+                // the same rule the tile animations follow: an interrupted fade then settles visible rather
+                // than leaving the host stuck transparent.
                 content.Opacity = to;
-                completed?.Invoke();
-                return;
+
+                var animation = new Anim.DoubleAnimation
+                {
+                    From = from < 0.01 ? 0.15 : from, // guarantee at least a short visible flash so the fade is perceptible
+                    To = to,
+                    Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(HostFadeMilliseconds)),
+                    EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
+                };
+                Anim.Storyboard.SetTarget(animation, content);
+                Anim.Storyboard.SetTargetProperty(animation, "Opacity");
+
+                var storyboard = new Anim.Storyboard();
+                storyboard.Children.Add(animation);
+                if (completed is not null)
+                    storyboard.Completed += (_, _) => InvokeAnimationCompletion(completed);
+
+                hostFadeStoryboard = storyboard;
+                storyboard.Begin();
             }
-
-            // Park the local value at the destination and let the animation supply the start through From,
-            // the same rule the tile animations follow: an interrupted fade then settles visible rather
-            // than leaving the host stuck transparent.
-            content.Opacity = to;
-
-            var animation = new Anim.DoubleAnimation
+            catch (Exception ex)
             {
-                From = from < 0.01 ? 0.15 : from, // guarantee at least a short visible flash so the fade is perceptible
-                To = to,
-                Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(HostFadeMilliseconds)),
-                EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
-            };
-            Anim.Storyboard.SetTarget(animation, content);
-            Anim.Storyboard.SetTargetProperty(animation, "Opacity");
-
-            var storyboard = new Anim.Storyboard();
-            storyboard.Children.Add(animation);
-            if (completed is not null)
-                storyboard.Completed += (_, _) => completed();
-
-            hostFadeStoryboard = storyboard;
-            storyboard.Begin();
+                hostFadeStoryboard = null;
+                try { content.Opacity = to; } catch { }
+                InvokeAnimationCompletion(completed);
+                Log.Warning(ex, "[widget] host fade skipped");
+            }
         }
 
-        public void Destroy() => appWindow?.Destroy();
+        private static void InvokeAnimationCompletion(Action? completed)
+        {
+            if (completed is null)
+                return;
+
+            try { completed(); }
+            catch (Exception ex) { Log.Debug($"[widget] animation completion skipped: {ex.Message}"); }
+        }
+
+        public void Destroy()
+        {
+            StopHostStoryboards();
+            appWindow?.Destroy();
+        }
 
         public void UpdatePosition(bool resetManualPosition = false)
         {
@@ -884,8 +914,8 @@ namespace TaskbarQuota.Taskbar
 
         /// <summary>
         /// Binds the tile slots to <paramref name="providers"/> in order (leftmost first) and re-lays out.
-        /// Providers beyond the slot pool are ignored — <see cref="UsageCoordinator.WidgetDisplayProviders"/>
-        /// already caps the list at <see cref="UsageCoordinator.MaxWidgetTiles"/>.
+        /// The coordinator supplies an ordering-only candidate list; the manager applies the effective cap
+        /// after routing each display. The slot-pool <c>Take</c> remains a final safety boundary here.
         /// </summary>
         public void SetDisplayProviders(IReadOnlyList<ProviderId> providers, ProviderId? activeProvider)
         {
@@ -957,8 +987,8 @@ namespace TaskbarQuota.Taskbar
         /// countdowns. There is deliberately no reduced form: trimming a pinned provider is worse than
         /// refusing the pin (issue #25), so keeping the row inside the bar is
         /// <see cref="Services.PinBudgetService"/>'s job. The only concession made here is holding back the
-        /// least recently used non-active tile when the row still overflows the measured gap, which covers
-        /// the transient case of an unpinned active tool arriving beside a full pinned set.
+        /// unpinned active tile when it arrives beside a full pinned set and the row still overflows the
+        /// measured gap.
         ///
         /// Widths are measured, never rendered: <see cref="WidgetSummary.MeasureDesiredWidth"/> is a pure
         /// calculation over the columns, whereas rendering to read a width restarted the tile's refresh
@@ -1103,8 +1133,8 @@ namespace TaskbarQuota.Taskbar
             UpdatePosition();
         }
 
-        private bool IsActiveTile(int slot)
-            => tileProviders[slot] is { } provider && activeTileProvider == provider;
+        private bool IsPinnedTile(int slot)
+            => tileProviders[slot] is { } provider && WidgetSettingsService.IsProviderPinned(provider);
 
         private int LayoutHash(int count, int total)
         {
@@ -1135,10 +1165,10 @@ namespace TaskbarQuota.Taskbar
         /// Holds tiles back until the row fits the free taskbar span, so the widget never grows over the
         /// shell's own buttons.
         ///
-        /// The ACTIVE tool's tile is the one thing never given up — showing the quota of whatever you are
-        /// working in is the widget's original job, and a pinned provider you are not currently touching is
-        /// the cheaper thing to lose for a moment. Pinned tiles yield least-recently-used first and come
-        /// straight back when you switch away, so a pin still guarantees presence the rest of the time.
+        /// A PINNED tile is the one thing never given up — it is the user's explicit "always show this"
+        /// request. The ACTIVE tool's tile is the cheaper courtesy tile to lose for a moment when pins fill
+        /// the measured gap. Pins are kept by the provider list and come straight back when the active tile
+        /// no longer needs the space.
         /// </summary>
         /// <param name="slots">Occupied slot indices; compacted in place. Returns how many survive.</param>
         private int HoldBackTilesThatDoNotFit(int[] slots, int count, int reservedWidth)
@@ -1148,7 +1178,7 @@ namespace TaskbarQuota.Taskbar
 
             var recent = UsageCoordinator.Instance.RecentProviders;
 
-            // Drop the least recently used non-active tile, one at a time, until the row fits. Selection is
+            // Drop the least recently used non-pinned tile, one at a time, until the row fits. Selection is
             // a linear scan rather than an ordered projection: at most three tiles, and this runs on every
             // usage publish, so the LINQ pipeline it replaces was allocating a dictionary, a lambda closure
             // and two lists per pass to sort three items.
@@ -1158,7 +1188,7 @@ namespace TaskbarQuota.Taskbar
                 int worstRecency = int.MinValue;
                 for (int n = 0; n < count; n++)
                 {
-                    if (IsActiveTile(slots[n]))
+                    if (IsPinnedTile(slots[n]))
                         continue;
 
                     int recency = RecencyOf(tileProviders[slots[n]], recent);
@@ -1236,22 +1266,34 @@ namespace TaskbarQuota.Taskbar
 
             // First layout of the session: the tiles have their own reveal animation, nothing to move from.
             bool hadPositions = lastTilePositions.Count > 0;
-            for (int n = 0; n < count; n++)
-            {
-                if (tileProviders[slots[n]] is not { } provider)
-                    continue;
 
-                int target = positions[provider];
-                if (lastTilePositions.TryGetValue(provider, out int previous))
+            // An animation racing a widget teardown raises XAML exceptions that can escalate into stowed
+            // exceptions and take down the whole dispatcher thread (issue #70). Tiles keep their previous
+            // positions on failure; the next health tick re-runs this pass.
+            try
+            {
+                for (int n = 0; n < count; n++)
                 {
-                    // Ignore sub-threshold drift from a value changing width; only real moves animate.
-                    if (Math.Abs(previous - target) >= TileMoveThresholdLogicalPx)
-                        tiles[slots[n]].AnimateSlide(previous - target);
+                    if (tileProviders[slots[n]] is not { } provider)
+                        continue;
+
+                    int target = positions[provider];
+                    if (lastTilePositions.TryGetValue(provider, out int previous))
+                    {
+                        // Ignore sub-threshold drift from a value changing width; only real moves animate.
+                        if (Math.Abs(previous - target) >= TileMoveThresholdLogicalPx)
+                            tiles[slots[n]].AnimateSlide(previous - target);
+                    }
+                    else if (hadPositions)
+                    {
+                        tiles[slots[n]].AnimateSlide(-TileEntryOffsetLogicalPx);
+                    }
                 }
-                else if (hadPositions)
-                {
-                    tiles[slots[n]].AnimateSlide(-TileEntryOffsetLogicalPx);
-                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[widget] tile move animation failed");
+                return;
             }
 
             // Swap rather than reassign: the outgoing dictionary becomes next pass's scratch buffer.
@@ -1284,12 +1326,13 @@ namespace TaskbarQuota.Taskbar
             int widest = 0;
             foreach (var (start, end) in gaps)
                 widest = Math.Max(widest, end - start);
-            if (widest <= 0)
-                return;
 
-            availableLogicalWidth = (int)Math.Floor(widest / dpiScale);
-            // Published so the pin budget can refuse a pin that would not fit this taskbar.
-            TaskbarSpace.AvailableLogicalWidth = availableLogicalWidth;
+            availableLogicalWidth = widest <= 0
+                ? TaskbarSpace.UnknownWidth
+                : (int)Math.Floor(widest / dpiScale);
+            // Published with the widget's display identity so another monitor cannot overwrite this
+            // taskbar's measurement. Zero is retained as an unknown marker during transient shell rebuilds.
+            TaskbarSpace.ReportAvailableWidth(displayKey, availableLogicalWidth, isPrimaryTaskbar);
         }
 
         private bool ResizeWidgetHost(int logicalWidth)
@@ -1331,46 +1374,61 @@ namespace TaskbarQuota.Taskbar
             if (content?.RenderTransform is not Microsoft.UI.Xaml.Media.CompositeTransform transform)
                 return;
 
-            storyboard?.Stop();
-            transform.TranslateX = travel;
-            transform.ScaleX = 0.985;
-            content.Opacity = Math.Min(content.Opacity <= 0 ? 1 : content.Opacity, 0.94);
-
-            var easing = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut };
-            var slide = new Anim.DoubleAnimation
+            try
             {
-                To = 0,
-                Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(LayoutTransitionMilliseconds)),
-                EasingFunction = easing,
-                EnableDependentAnimation = true,
-            };
-            Anim.Storyboard.SetTarget(slide, transform);
-            Anim.Storyboard.SetTargetProperty(slide, "TranslateX");
+                storyboard?.Stop();
+                transform.TranslateX = travel;
+                transform.ScaleX = 0.985;
+                content.Opacity = Math.Min(content.Opacity <= 0 ? 1 : content.Opacity, 0.94);
 
-            var scale = new Anim.DoubleAnimation
+                var easing = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut };
+                var slide = new Anim.DoubleAnimation
+                {
+                    To = 0,
+                    Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(LayoutTransitionMilliseconds)),
+                    EasingFunction = easing,
+                    EnableDependentAnimation = true,
+                };
+                Anim.Storyboard.SetTarget(slide, transform);
+                Anim.Storyboard.SetTargetProperty(slide, "TranslateX");
+
+                var scale = new Anim.DoubleAnimation
+                {
+                    To = 1,
+                    Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(LayoutTransitionMilliseconds)),
+                    EasingFunction = easing,
+                };
+                Anim.Storyboard.SetTarget(scale, transform);
+                Anim.Storyboard.SetTargetProperty(scale, "ScaleX");
+
+                var fade = new Anim.DoubleAnimation
+                {
+                    To = 1,
+                    Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(LayoutTransitionMilliseconds)),
+                    EasingFunction = easing,
+                };
+                Anim.Storyboard.SetTarget(fade, content);
+                Anim.Storyboard.SetTargetProperty(fade, "Opacity");
+
+                var next = new Anim.Storyboard();
+                next.Children.Add(slide);
+                next.Children.Add(scale);
+                next.Children.Add(fade);
+                storyboard = next;
+                next.Begin();
+            }
+            catch (Exception ex)
             {
-                To = 1,
-                Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(LayoutTransitionMilliseconds)),
-                EasingFunction = easing,
-            };
-            Anim.Storyboard.SetTarget(scale, transform);
-            Anim.Storyboard.SetTargetProperty(scale, "ScaleX");
-
-            var fade = new Anim.DoubleAnimation
-            {
-                To = 1,
-                Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(LayoutTransitionMilliseconds)),
-                EasingFunction = easing,
-            };
-            Anim.Storyboard.SetTarget(fade, content);
-            Anim.Storyboard.SetTargetProperty(fade, "Opacity");
-
-            var next = new Anim.Storyboard();
-            next.Children.Add(slide);
-            next.Children.Add(scale);
-            next.Children.Add(fade);
-            storyboard = next;
-            next.Begin();
+                storyboard = null;
+                try
+                {
+                    transform.TranslateX = 0;
+                    transform.ScaleX = 1;
+                    content.Opacity = 1;
+                }
+                catch { }
+                Log.Warning(ex, "[widget] layout animation skipped");
+            }
         }
 
         private bool SetActivityHostVisible(bool visible)
@@ -1407,59 +1465,46 @@ namespace TaskbarQuota.Taskbar
         {
             if (activityHostContent is not { } content)
             {
-                completed?.Invoke();
+                InvokeAnimationCompletion(completed);
                 return;
             }
 
-            activityFadeStoryboard?.Stop();
-            double from = content.Opacity;
-            bool skip = Math.Abs(from - to) < 0.01 && to > 0.5;
-            if (skip)
+            try
             {
-                content.Opacity = to;
-                completed?.Invoke();
-                return;
-            }
-
-            content.Opacity = to;
-            var animation = new Anim.DoubleAnimation
-            {
-                From = from < 0.01 ? 0.15 : from,
-                To = to,
-                Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(HostFadeMilliseconds)),
-                EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
-            };
-            Anim.Storyboard.SetTarget(animation, content);
-            Anim.Storyboard.SetTargetProperty(animation, "Opacity");
-
-            var storyboard = new Anim.Storyboard();
-            storyboard.Children.Add(animation);
-            if (completed is not null)
-                storyboard.Completed += (_, _) => completed();
-            activityFadeStoryboard = storyboard;
-            storyboard.Begin();
-        }
-
-        private void SetActivityLogicalWidthOnUiThread(int logicalWidth, int physicalWidth)
-        {
-            var summary = activitySummary;
-            if (summary is null)
-                return;
-
-            var dispatcher = summary.DispatcherQueue;
-            if (dispatcher.HasThreadAccess)
-            {
-                summary.SetLogicalWidth(logicalWidth);
-                return;
-            }
-
-            if (!dispatcher.TryEnqueue(() =>
+                activityFadeStoryboard?.Stop();
+                double from = content.Opacity;
+                bool skip = Math.Abs(from - to) < 0.01 && to > 0.5;
+                if (skip)
                 {
-                    if (!disposedValue && ActivityHostWidth == physicalWidth)
-                        summary.SetLogicalWidth(logicalWidth);
-                }))
+                    content.Opacity = to;
+                    InvokeAnimationCompletion(completed);
+                    return;
+                }
+
+                content.Opacity = to;
+                var animation = new Anim.DoubleAnimation
+                {
+                    From = from < 0.01 ? 0.15 : from,
+                    To = to,
+                    Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(HostFadeMilliseconds)),
+                    EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
+                };
+                Anim.Storyboard.SetTarget(animation, content);
+                Anim.Storyboard.SetTargetProperty(animation, "Opacity");
+
+                var storyboard = new Anim.Storyboard();
+                storyboard.Children.Add(animation);
+                if (completed is not null)
+                    storyboard.Completed += (_, _) => InvokeAnimationCompletion(completed);
+                activityFadeStoryboard = storyboard;
+                storyboard.Begin();
+            }
+            catch (Exception ex)
             {
-                Log.Warning("Could not enqueue adaptive activity width on the UI thread");
+                activityFadeStoryboard = null;
+                try { content.Opacity = to; } catch { }
+                InvokeAnimationCompletion(completed);
+                Log.Warning(ex, "[widget] activity fade skipped");
             }
         }
 
@@ -1494,7 +1539,7 @@ namespace TaskbarQuota.Taskbar
                 positionRunnerActive = true;
             }
 
-            _ = ProcessPositionUpdatesAsync();
+            _ = Task.Run(ProcessPositionUpdatesAsync);
         }
 
         private async Task ProcessPositionUpdatesAsync()
@@ -1685,18 +1730,15 @@ namespace TaskbarQuota.Taskbar
                     offsetX = fitX;
                 }
 
+                int adaptiveLogicalWidth = 0;
+                int adaptivePhysicalWidth = 0;
                 if (pairPlacement is { } adaptivePair)
                 {
-                    int logicalWidth = Math.Clamp(
+                    adaptiveLogicalWidth = Math.Clamp(
                         (int)Math.Floor(adaptivePair.ActivityWidth / dpiScale),
                         AgentActivitySummary.MinimumLogicalWidth,
                         AgentActivitySummary.DesiredLogicalWidth);
-                    int physicalWidth = (int)Math.Ceiling(logicalWidth * dpiScale);
-                    bool widthChanged = ActivityHostWidth != physicalWidth;
-                    ActivityHostWidth = physicalWidth;
-                    SetActivityLogicalWidthOnUiThread(logicalWidth, physicalWidth);
-                    if (widthChanged)
-                        Log.Debug($"activity width adapted to {logicalWidth} logical px beside quota");
+                    adaptivePhysicalWidth = (int)Math.Ceiling(adaptiveLogicalWidth * dpiScale);
                 }
 
                 offsetX = ClampToTaskbarMonitor(
@@ -1710,45 +1752,61 @@ namespace TaskbarQuota.Taskbar
 
                 int offsetY = barRect.top;
                 cancellationToken.ThrowIfCancellationRequested();
-                var targetAppWindow = appWindow;
-                if (disposedValue || targetAppWindow is null || !IsAlive)
+                if (disposedValue || appWindow is null || !IsAlive)
                     return;
 
-                int previousQuotaOffsetX = currentOffsetX;
-                if (currentOffsetY != offsetY)
+                int activityX = pairPlacement is { } resolvedPair
+                    ? resolvedPair.ActivityX + (offsetX - resolvedPair.QuotaX)
+                    : int.MinValue;
+                int targetX = offsetX;
+                int targetY = offsetY;
+                int targetHeight = barRect.bottom - barRect.top;
+                int measuredActivityWidth = ActivityHostWidth;
+                await RunOnWidgetDispatcherAsync(() =>
                 {
-                    targetAppWindow.MoveAndResize(new RectInt32(offsetX, offsetY, WidgetHostWidth, barRect.bottom - barRect.top));
-                    currentOffsetX = offsetX; currentOffsetY = offsetY;
-                }
-                else if (ShouldReposition(currentOffsetX, offsetX, RepositionDeadbandPx))
-                {
-                    targetAppWindow.Move(new PointInt32(offsetX, offsetY));
-                    currentOffsetX = offsetX;
-                }
-                if (previousQuotaOffsetX != int.MinValue && previousQuotaOffsetX != offsetX)
-                    AnimateLayoutSurface(hostContent, ref quotaLayoutStoryboard, previousQuotaOffsetX - offsetX);
+                    if (disposedValue || appWindow is null || IsUserRepositioning)
+                        return;
 
-                if (isActivityVisible && activityAppWindow is not null)
-                {
-                    if (pairPlacement is null)
+                    // A DPI change or drag on the UI thread since the measurement wins over this pass's width.
+                    if (adaptivePhysicalWidth > 0 && ActivityHostWidth == measuredActivityWidth)
+                    {
+                        if (ActivityHostWidth != adaptivePhysicalWidth)
+                            Log.Debug($"activity width adapted to {adaptiveLogicalWidth} logical px beside quota");
+                        ActivityHostWidth = adaptivePhysicalWidth;
+                        activitySummary?.SetLogicalWidth(adaptiveLogicalWidth);
+                    }
+
+                    int previousQuotaOffsetX = currentOffsetX;
+                    if (currentOffsetY != targetY)
+                    {
+                        appWindow.MoveAndResize(new RectInt32(targetX, targetY, WidgetHostWidth, targetHeight));
+                        currentOffsetX = targetX;
+                        currentOffsetY = targetY;
+                    }
+                    else if (ShouldReposition(currentOffsetX, targetX, RepositionDeadbandPx))
+                    {
+                        appWindow.Move(new PointInt32(targetX, targetY));
+                        currentOffsetX = targetX;
+                    }
+                    if (previousQuotaOffsetX != int.MinValue && previousQuotaOffsetX != targetX)
+                        AnimateLayoutSurface(hostContent, ref quotaLayoutStoryboard, previousQuotaOffsetX - targetX);
+
+                    if (!isActivityVisible || activityAppWindow is null)
+                        return;
+                    if (activityX == int.MinValue)
                     {
                         Log.Debug("activity hidden: no taskbar lane can fit quota plus the minimum activity width");
                         SetActivityHostVisible(false);
                         return;
                     }
 
-                    var resolvedPair = pairPlacement.Value;
-                    // Keep the solver's saved/detached activity coordinate. If the final monitor clamp
-                    // nudged the quota by a few pixels, carry that same delta to the activity window so
-                    // the pair remains separated without collapsing back beside quota.
-                    int activityX = resolvedPair.ActivityX + (offsetX - resolvedPair.QuotaX);
                     int previousActivityOffsetX = activityOffsetX;
                     activityAppWindow.MoveAndResize(new RectInt32(
-                        activityX, offsetY, ActivityHostWidth, barRect.bottom - barRect.top));
+                        activityX, targetY, ActivityHostWidth, targetHeight));
                     activityOffsetX = activityX;
                     if (previousActivityOffsetX != int.MinValue && previousActivityOffsetX != activityX)
                         AnimateLayoutSurface(activityHostContent, ref activityLayoutStoryboard, previousActivityOffsetX - activityX);
-                }
+                }, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -1763,6 +1821,42 @@ namespace TaskbarQuota.Taskbar
                 if (gateAcquired)
                     positionUpdateGate.Release();
             }
+        }
+
+        private Task RunOnWidgetDispatcherAsync(Action action, CancellationToken cancellationToken)
+        {
+            var dispatcher = widgetDispatcher ?? throw new InvalidOperationException("Widget dispatcher is unavailable.");
+            return DispatchPositionUpdateAsync(dispatcher.HasThreadAccess,
+                callback => dispatcher.TryEnqueue(() => callback()), action, cancellationToken);
+        }
+
+        internal static Task DispatchPositionUpdateAsync(
+            bool hasThreadAccess,
+            Func<Action, bool> tryEnqueue,
+            Action action,
+            CancellationToken cancellationToken)
+        {
+            if (hasThreadAccess)
+            {
+                action();
+                return Task.CompletedTask;
+            }
+
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!tryEnqueue(() =>
+                {
+                    try
+                    {
+                        action();
+                        completion.TrySetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        completion.TrySetException(ex);
+                    }
+                }))
+                completion.TrySetException(new InvalidOperationException("Could not enqueue widget position update."));
+            return completion.Task.WaitAsync(cancellationToken);
         }
 
         /// <summary>Deadband: ignore sub-threshold recompute deltas (rounding / transient tray width
@@ -2279,35 +2373,49 @@ namespace TaskbarQuota.Taskbar
             if (quotaTransform is null || activityTransform is null)
                 return;
 
-            swapVisualStoryboard?.Stop();
-            quotaTransform.TranslateX = quotaOldX - quotaNewX;
-            activityTransform.TranslateX = activityOldX - activityNewX;
-
-            var storyboard = new Anim.Storyboard();
-            var quotaSlide = new Anim.DoubleAnimation
+            try
             {
-                To = 0,
-                Duration = TimeSpan.FromMilliseconds(180),
-                EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
-                EnableDependentAnimation = true,
-            };
-            Anim.Storyboard.SetTarget(quotaSlide, quotaTransform);
-            Anim.Storyboard.SetTargetProperty(quotaSlide, "TranslateX");
+                swapVisualStoryboard?.Stop();
+                quotaTransform.TranslateX = quotaOldX - quotaNewX;
+                activityTransform.TranslateX = activityOldX - activityNewX;
 
-            var activitySlide = new Anim.DoubleAnimation
+                var storyboard = new Anim.Storyboard();
+                var quotaSlide = new Anim.DoubleAnimation
+                {
+                    To = 0,
+                    Duration = TimeSpan.FromMilliseconds(180),
+                    EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
+                    EnableDependentAnimation = true,
+                };
+                Anim.Storyboard.SetTarget(quotaSlide, quotaTransform);
+                Anim.Storyboard.SetTargetProperty(quotaSlide, "TranslateX");
+
+                var activitySlide = new Anim.DoubleAnimation
+                {
+                    To = 0,
+                    Duration = TimeSpan.FromMilliseconds(180),
+                    EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
+                    EnableDependentAnimation = true,
+                };
+                Anim.Storyboard.SetTarget(activitySlide, activityTransform);
+                Anim.Storyboard.SetTargetProperty(activitySlide, "TranslateX");
+
+                storyboard.Children.Add(quotaSlide);
+                storyboard.Children.Add(activitySlide);
+                swapVisualStoryboard = storyboard;
+                storyboard.Begin();
+            }
+            catch (Exception ex)
             {
-                To = 0,
-                Duration = TimeSpan.FromMilliseconds(180),
-                EasingFunction = new Anim.CubicEase { EasingMode = Anim.EasingMode.EaseOut },
-                EnableDependentAnimation = true,
-            };
-            Anim.Storyboard.SetTarget(activitySlide, activityTransform);
-            Anim.Storyboard.SetTargetProperty(activitySlide, "TranslateX");
-
-            storyboard.Children.Add(quotaSlide);
-            storyboard.Children.Add(activitySlide);
-            swapVisualStoryboard = storyboard;
-            storyboard.Begin();
+                swapVisualStoryboard = null;
+                try
+                {
+                    quotaTransform.TranslateX = 0;
+                    activityTransform.TranslateX = 0;
+                }
+                catch { }
+                Log.Warning(ex, "[widget] pair-swap animation skipped");
+            }
         }
 
         /// <summary>
@@ -3340,6 +3448,7 @@ namespace TaskbarQuota.Taskbar
                 return;
 
             disposedValue = true;
+            TaskbarSpace.ForgetDisplay(displayKey);
             StopDragPolling();
             EndUserRepositioning();
             initialized = false;
@@ -3427,8 +3536,28 @@ namespace TaskbarQuota.Taskbar
             try { positionUpdateGate.Dispose(); } catch { }
         }
 
+        private void StopHostStoryboards()
+        {
+            StopStoryboard(ref hostFadeStoryboard);
+            StopStoryboard(ref activityFadeStoryboard);
+            StopStoryboard(ref quotaLayoutStoryboard);
+            StopStoryboard(ref activityLayoutStoryboard);
+            StopStoryboard(ref swapVisualStoryboard);
+            foreach (var tile in tiles)
+                tile?.StopAnimations();
+            activitySummary?.StopAnimations();
+        }
+
+        private static void StopStoryboard(ref Anim.Storyboard? storyboard)
+        {
+            try { storyboard?.Stop(); }
+            catch { }
+            storyboard = null;
+        }
+
         private void DisposeWindowResources()
         {
+            StopHostStoryboards();
             if (hwnd != IntPtr.Zero)
                 HostOwners.TryRemove(hwnd, out _);
             if (activityHwnd != IntPtr.Zero)

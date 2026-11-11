@@ -147,14 +147,14 @@ namespace TaskbarQuota.Usage.Providers
             var dailyReset = UnixToOffset(Number(planStatus, "dailyQuotaResetAtUnix"));
             var weeklyReset = UnixToOffset(Number(planStatus, "weeklyQuotaResetAtUnix"));
 
-            RateWindow? dailyWindow = !hideDaily && dailyRemaining is { } dr ? MakeWindow(dr, dailyReset) : null;
+            RateWindow? dailyWindow = !hideDaily && dailyRemaining is { } dr ? MakeWindow(dr, dailyReset, QuotaWindowLength.Daily) : null;
 
             RateWindow? weeklyWindow;
             if (weeklyRemaining is { } wr)
-                weeklyWindow = MakeWindow(wr, weeklyReset);
+                weeklyWindow = MakeWindow(wr, weeklyReset, QuotaWindowLength.Weekly);
             else if (hideDaily && dailyRemaining is { } hiddenDaily)
                 // Devin reuses the hidden daily field as the weekly figure when no weekly percent is sent.
-                weeklyWindow = MakeWindow(hiddenDaily, weeklyReset);
+                weeklyWindow = MakeWindow(hiddenDaily, weeklyReset, QuotaWindowLength.Weekly);
             else
                 weeklyWindow = null;
 
@@ -180,10 +180,10 @@ namespace TaskbarQuota.Usage.Providers
             return true;
         }
 
-        private static RateWindow MakeWindow(double remainingPercent, DateTimeOffset? resetAt)
+        private static RateWindow MakeWindow(double remainingPercent, DateTimeOffset? resetAt, int windowMinutes)
         {
             double used = Math.Clamp(100 - remainingPercent, 0, 100);
-            return new RateWindow(used, windowMinutes: null, resetAt: resetAt,
+            return new RateWindow(used, windowMinutes: windowMinutes, resetAt: resetAt,
                 resetDescription: CodexProvider.FormatResetCountdown(resetAt));
         }
 

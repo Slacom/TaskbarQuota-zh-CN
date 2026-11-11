@@ -51,7 +51,7 @@ public class KimiProviderTests
         Assert.Equal(300, result.Usage.Primary.WindowMinutes);
         Assert.NotNull(result.Usage.Secondary);
         Assert.InRange(result.Usage.Secondary!.UsedPercent, 24, 26);
-        Assert.Null(result.Usage.Secondary.WindowMinutes);
+        Assert.Equal(10080, result.Usage.Secondary.WindowMinutes);
     }
 
     [Fact]

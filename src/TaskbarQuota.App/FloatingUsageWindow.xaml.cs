@@ -27,7 +27,9 @@ namespace TaskbarQuota;
 /// <summary>
 /// Always-on-top host for the same compact usage layout as the taskbar widget.
 /// Single window, draggable, position persisted under app data.
-/// Scroll wheel adjusts Acrylic strength; right-click returns usage to the taskbar.
+/// Scroll wheel adjusts Acrylic strength, Ctrl + wheel adjusts whole-window opacity; right-click
+/// returns usage to the taskbar. Optional click-through; holding Ctrl over a click-through window makes
+/// it interactive again until Ctrl is released.
 /// </summary>
 public sealed partial class FloatingUsageWindow : Window
 {
@@ -46,6 +48,11 @@ public sealed partial class FloatingUsageWindow : Window
     private const float AcrylicLuminosityOpacityMax = 0.80f;
     /// <summary>Matches the settings / flyout opacity slider step (5%).</summary>
     public const double OpacityWheelStep = 0.05;
+    private const int VK_LBUTTON = 0x01;
+    private const int VK_RBUTTON = 0x02;
+    private const int VK_CONTROL = 0x11;
+    private const int SM_SWAPBUTTON = 23;
+    private static readonly TimeSpan InteractionPollInterval = TimeSpan.FromMilliseconds(50);
 
     private AppWindow? _appWindow;
     private bool _shown;
@@ -67,6 +74,11 @@ public sealed partial class FloatingUsageWindow : Window
     private bool _hasPrewarmRestorePosition;
     private bool _acrylicFrameReady;
     private bool _acrylicFrameReadyScheduled;
+    private DispatcherQueueTimer? _interactionTimer;
+    // True while Ctrl is held over a click-through window (or a drag that began that way is active).
+    private bool _interactionOverride;
+    // WinUI does not create layered windows, but never strip WS_EX_LAYERED if something else set it.
+    private bool? _nativeLayered;
 
     // Same instance for AddHandler/RemoveHandler; method-group casts would not match.
     private readonly PointerEventHandler _rootPointerPressed;
@@ -166,6 +178,8 @@ public sealed partial class FloatingUsageWindow : Window
 
         Closed += OnClosed;
         ApplyAcrylicMaterial();
+        // After SetPresenter: presenter changes rewrite the window styles.
+        ApplyWindowChrome();
         LoadPositionOrDefault();
         ApplyBounds(forceShow: false);
     }
@@ -184,6 +198,13 @@ public sealed partial class FloatingUsageWindow : Window
         Root.RemoveHandler(UIElement.PointerWheelChangedEvent, _rootPointerWheelChanged);
         Root.RightTapped -= Root_RightTapped;
 
+        if (_interactionTimer is not null)
+        {
+            _interactionTimer.Stop();
+            _interactionTimer.Tick -= OnInteractionTick;
+            _interactionTimer = null;
+        }
+
         if (_themeSettings is not null)
         {
             _themeSettings.Changed -= OnThemeSettingsChanged;
@@ -201,7 +222,133 @@ public sealed partial class FloatingUsageWindow : Window
     }
 
     private void OnWidgetSettingsChanged(object? sender, EventArgs e)
-        => DispatcherQueue.TryEnqueue(ApplyAcrylicMaterial);
+        => DispatcherQueue.TryEnqueue(() =>
+        {
+            ApplyAcrylicMaterial();
+            ApplyWindowChrome();
+        });
+
+    /// <summary>
+    /// Applies whole-window opacity (<c>WS_EX_LAYERED</c> + <c>LWA_ALPHA</c>) and click-through
+    /// (<c>WS_EX_TRANSPARENT</c>). With 100% opacity and click-through off the window is left
+    /// non-layered, exactly as before these settings existed.
+    /// </summary>
+    private void ApplyWindowChrome()
+    {
+        var hwnd = Handle;
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        bool clickThrough = WidgetSettingsService.FloatingClickThrough;
+        if (!clickThrough || !_shown)
+            _interactionOverride = false;
+
+        // Ctrl only toggles hit-testing; the user's chosen opacity is kept while interacting.
+        byte alpha = ComputeLayeredAlpha(WidgetSettingsService.FloatingWindowOpacity);
+        // Keep the window layered for the whole click-through session so Ctrl only flips
+        // WS_EX_TRANSPARENT instead of recreating the layered redirection surface each time.
+        bool ownsLayered = alpha < byte.MaxValue || clickThrough;
+
+        try
+        {
+            long current = User32.GetWindowLongPtr(hwnd, User32.GWL_EXSTYLE).ToInt64();
+            _nativeLayered ??= (current & (long)WindowStylesExtended.WS_EX_LAYERED) != 0;
+            long next = ComputeExStyle(
+                current,
+                layered: ownsLayered || _nativeLayered == true,
+                transparent: clickThrough && !_interactionOverride);
+            if (next != current)
+                User32.SetWindowLongPtr(hwnd, User32.GWL_EXSTYLE, new IntPtr(next));
+            if (ownsLayered)
+                User32.SetLayeredWindowAttributes(hwnd, 0, alpha, User32.LWA_ALPHA);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not apply floating widget opacity/click-through styles");
+        }
+
+        UpdateInteractionPolling(clickThrough && _shown);
+    }
+
+    internal static long ComputeExStyle(long current, bool layered, bool transparent)
+    {
+        const long layeredBit = (long)WindowStylesExtended.WS_EX_LAYERED;
+        const long transparentBit = (long)WindowStylesExtended.WS_EX_TRANSPARENT;
+
+        long style = current & ~(layeredBit | transparentBit);
+        // WS_EX_TRANSPARENT only passes clicks through when the window is also layered.
+        if (layered || transparent)
+            style |= layeredBit;
+        if (transparent)
+            style |= transparentBit;
+        return style;
+    }
+
+    internal static byte ComputeLayeredAlpha(double opacity)
+        => (byte)Math.Round(
+            Math.Clamp(opacity, WidgetSettingsService.FloatingWindowOpacityMin, WidgetSettingsService.FloatingWindowOpacityMax)
+                * byte.MaxValue);
+
+    /// <summary>
+    /// A click-through window accepts input while Ctrl is held with the cursor over it, and keeps
+    /// accepting it for a press/drag that started that way even if Ctrl is released mid-drag.
+    /// </summary>
+    internal static bool ShouldAllowInteraction(bool modifierHeld, bool cursorOverWindow, bool pointerActive)
+        => pointerActive || (modifierHeld && cursorOverWindow);
+
+    private void UpdateInteractionPolling(bool enabled)
+    {
+        if (!enabled)
+        {
+            _interactionTimer?.Stop();
+            return;
+        }
+
+        if (_interactionTimer is null)
+        {
+            _interactionTimer = DispatcherQueue.CreateTimer();
+            _interactionTimer.Interval = InteractionPollInterval;
+            _interactionTimer.IsRepeating = true;
+            _interactionTimer.Tick += OnInteractionTick;
+        }
+
+        if (!_interactionTimer.IsRunning)
+            _interactionTimer.Start();
+    }
+
+    // Polling rather than a low-level keyboard hook: a WS_EX_TRANSPARENT window receives no input of
+    // its own, and a global hook would add latency to every keystroke on the machine.
+    private void OnInteractionTick(DispatcherQueueTimer sender, object args)
+    {
+        bool modifierHeld = IsKeyDown(VK_CONTROL);
+        // A press released off-window before the drag threshold never reaches PointerReleased, leaving
+        // _isPointerTracking stale. Trust it only while the (logical) left button is physically down,
+        // otherwise a stale flag would keep click-through disabled indefinitely.
+        bool pointerActive = _isPointerTracking && IsKeyDown(PrimaryMouseButtonVirtualKey());
+        bool allow = ShouldAllowInteraction(modifierHeld, IsCursorOverWindow(), pointerActive);
+        if (allow == _interactionOverride)
+            return;
+
+        _interactionOverride = allow;
+        ApplyWindowChrome();
+    }
+
+    private static bool IsKeyDown(int virtualKey)
+        => (User32.GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+
+    // GetAsyncKeyState reads physical buttons; with swapped buttons the logical left is VK_RBUTTON.
+    private static int PrimaryMouseButtonVirtualKey()
+        => User32.GetSystemMetrics(SM_SWAPBUTTON) != 0 ? VK_RBUTTON : VK_LBUTTON;
+
+    private bool IsCursorOverWindow()
+    {
+        var hwnd = Handle;
+        return hwnd != IntPtr.Zero
+            && User32.GetCursorPos(out var cursor)
+            && User32.GetWindowRect(hwnd, out var rect)
+            && cursor.x >= rect.left && cursor.x < rect.right
+            && cursor.y >= rect.top && cursor.y < rect.bottom;
+    }
 
     private void InitializeAcrylicBackdrop()
     {
@@ -395,9 +542,24 @@ public sealed partial class FloatingUsageWindow : Window
     /// increases opacity (wheel up); negative decreases.
     /// </summary>
     public static double StepOpacityFromWheel(double current, int wheelDelta)
+        => StepFromWheel(
+            current,
+            wheelDelta,
+            WidgetSettingsService.FloatingOpacityMin,
+            WidgetSettingsService.FloatingOpacityMax);
+
+    /// <summary>Ctrl + wheel counterpart of <see cref="StepOpacityFromWheel"/> for whole-window opacity.</summary>
+    public static double StepWindowOpacityFromWheel(double current, int wheelDelta)
+        => StepFromWheel(
+            current,
+            wheelDelta,
+            WidgetSettingsService.FloatingWindowOpacityMin,
+            WidgetSettingsService.FloatingWindowOpacityMax);
+
+    private static double StepFromWheel(double current, int wheelDelta, double min, double max)
     {
         if (wheelDelta == 0)
-            return Math.Clamp(current, WidgetSettingsService.FloatingOpacityMin, WidgetSettingsService.FloatingOpacityMax);
+            return Math.Clamp(current, min, max);
 
         // Standard mouse notch is 120; precision touchpads may send smaller deltas.
         int steps = wheelDelta / 120;
@@ -405,10 +567,7 @@ public sealed partial class FloatingUsageWindow : Window
             steps = wheelDelta > 0 ? 1 : -1;
 
         double next = current + (steps * OpacityWheelStep);
-        return Math.Clamp(
-            Math.Round(next / OpacityWheelStep) * OpacityWheelStep,
-            WidgetSettingsService.FloatingOpacityMin,
-            WidgetSettingsService.FloatingOpacityMax);
+        return Math.Clamp(Math.Round(next / OpacityWheelStep) * OpacityWheelStep, min, max);
     }
 
     private void OnContentClicked()
@@ -458,6 +617,7 @@ public sealed partial class FloatingUsageWindow : Window
                 _appWindow.Show(false);
             _shown = true;
             ApplyAcrylicMaterial();
+            ApplyWindowChrome();
             ScheduleAcrylicFrameReady();
             // Hide/show and settings thrash can leave tiles at Opacity 0 while still "assigned".
             ContentHost.EnsureVisibleContent();
@@ -467,6 +627,7 @@ public sealed partial class FloatingUsageWindow : Window
             if (_appWindow.IsVisible)
                 _appWindow.Hide();
             _shown = false;
+            ApplyWindowChrome();
         }
     }
 
@@ -509,6 +670,14 @@ public sealed partial class FloatingUsageWindow : Window
             return;
 
         e.Handled = true;
+        // Read the live key state: the HUD never takes keyboard focus, so focus-based modifiers are unreliable.
+        if (IsKeyDown(VK_CONTROL))
+        {
+            WidgetSettingsService.ApplyFloatingWindowOpacity(
+                StepWindowOpacityFromWheel(WidgetSettingsService.FloatingWindowOpacity, props.MouseWheelDelta));
+            return;
+        }
+
         double next = StepOpacityFromWheel(WidgetSettingsService.FloatingOpacity, props.MouseWheelDelta);
         WidgetSettingsService.ApplyFloatingOpacity(next);
     }

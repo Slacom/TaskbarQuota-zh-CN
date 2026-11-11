@@ -170,9 +170,10 @@ namespace TaskbarQuota.Usage.Providers
                 if (!g.TryGetProperty("buckets", out var buckets) || buckets.ValueKind != JsonValueKind.Array) continue;
                 foreach (var b in buckets.EnumerateArray())
                 {
-                    var window = RateWindowFromQuota(b); // buckets carry remainingFraction + resetTime like quotaInfo
+                    bool fiveHour = IsFiveHourBucket(b);
+                    var window = RateWindowFromQuota(b, fiveHour ? QuotaWindowLength.FiveHours : QuotaWindowLength.Weekly); // buckets carry remainingFraction + resetTime like quotaInfo
                     any = true;
-                    if (IsFiveHourBucket(b))
+                    if (fiveHour)
                     {
                         if (isGemini) geminiFiveHour = window; else otherFiveHour = window;
                     }
@@ -232,7 +233,7 @@ namespace TaskbarQuota.Usage.Providers
             return (s.Contains("gemini") || s.Contains("flash")) && !s.Contains("claude") && !s.Contains("gpt");
         }
 
-        private static RateWindow RateWindowFromQuota(JsonElement quota)
+        private static RateWindow RateWindowFromQuota(JsonElement quota, int? windowMinutes = null)
         {
             double remaining = quota.TryGetProperty("remainingFraction", out var rf) && rf.ValueKind == JsonValueKind.Number ? rf.GetDouble() : 1.0;
             string? reset = quota.TryGetProperty("resetTime", out var rt) ? rt.GetString() : null;
@@ -240,7 +241,7 @@ namespace TaskbarQuota.Usage.Providers
             if (reset != null && DateTimeOffset.TryParse(reset, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt))
                 resetAt = dt;
-            return new RateWindow((1.0 - remaining) * 100.0, null, resetAt, CodexProvider.FormatResetCountdown(resetAt));
+            return new RateWindow((1.0 - remaining) * 100.0, windowMinutes, resetAt, CodexProvider.FormatResetCountdown(resetAt));
         }
 
         internal sealed record ProcessInfo(

@@ -33,6 +33,23 @@ public class QuotaPacingTests
     }
 
     [Fact]
+    public void SpentWindowTooltipSaysLimitReached()
+    {
+        var result = QuotaPacing.Evaluate(new RateWindow(100, 10080, Now.AddDays(1)), Now);
+        Assert.Equal(PaceSeverity.Spent, result.Severity);
+        Assert.Equal("已达额度上限", QuotaPacing.Tooltip(result, Now));
+    }
+
+    [Fact]
+    public void ClosePaceReportsSpareAndNoRunOut()
+    {
+        var result = QuotaPacing.Evaluate(new RateWindow(47.5, 10080, Now.AddDays(3.5)), Now);
+        Assert.Equal(PaceSeverity.Close, result.Severity);
+        Assert.Null(result.RunOutAt);
+        Assert.InRange(result.IdealPacePercent!.Value, 49.9, 50.1);
+    }
+
+    [Fact]
     public void MissingWindowMetadataIsUntracked()
     {
         var result = QuotaPacing.Evaluate(new RateWindow(50, resetAt: Now.AddHours(1)), Now);

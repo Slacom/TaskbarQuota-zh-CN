@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -8,11 +9,13 @@ using H.NotifyIcon.Core;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.Windows.AppLifecycle;
 using TaskbarQuota.Diagnostics;
 using TaskbarQuota.Interop;
 using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 using TaskbarQuota.AgentActivity;
+using TaskbarQuota.Services;
 
 namespace TaskbarQuota.Taskbar
 {
@@ -24,6 +27,7 @@ namespace TaskbarQuota.Taskbar
     {
         private static TrayIcon? _trayIcon;
         private static PopupMenu? _trayMenu;
+        private static PopupMenuItem? _clickThroughMenuItem;
         private static System.Drawing.Icon? _trayIconSource;
         private static readonly Dictionary<IntPtr, TaskBarWidget> Widgets = new();
         // Reused snapshot of Widgets.Values, so iterating it while a callback may mutate the dictionary
@@ -49,19 +53,184 @@ namespace TaskbarQuota.Taskbar
         private static readonly TopologyStabilityTracker TopologyStability = new();
         private static readonly Dictionary<IntPtr, int> MissingTaskbarObservations = new();
         private static readonly AdaptiveDisplayProviderState AdaptiveDisplayProviders = new();
+        private static IReadOnlyList<DisplayIdentity> DisplayIdentities = [];
+        private static IReadOnlyList<TaskbarWindowTarget> DisplayTargets = [];
         private static ProviderId? _lastLoggedWidgetApplyProvider;
         private static WidgetSurfaceMode _activeSurface = WidgetSurfaceMode.Taskbar;
         // Foreground hook: fires the instant Windows switches windows so the focus-follows-provider
         // widget reacts on the switch itself instead of waiting for the next 500 ms detect tick.
         private static ActiveApp.ForegroundWatcher? _foregroundWatcher;
         private static SessionTopologyWatcher? _sessionTopologyWatcher;
+        // UI-thread watchdog (issue #70). A WinUI stowed exception can take down the dispatcher thread
+        // while every background thread keeps running: the process looks alive in Task Manager, the widget
+        // is gone, and nothing logs because UI-side logging died with the thread. The DispatcherTimer-based
+        // health tick cannot detect this — it dies with the thread it monitors — so a plain thread-pool
+        // timer heartbeats the queue from the outside instead.
+        private static System.Threading.Timer? _uiWatchdogTimer;
+        private static int _uiHeartbeat;
+        private static long _uiHeartbeatObserved = -1;
+        private static int _uiHeartbeatMisses;
+        private static int _uiWatchdogStopping;
+        private static int _uiWatchdogRestartRequested;
+        private const int UiWatchdogMissLimit = 3;
 
         private static bool IsFloatingSurface => _activeSurface == WidgetSurfaceMode.Floating;
+
+        /// <summary>
+        /// Background heartbeat for the dispatcher thread (issue #70). Every 5 s a thread-pool timer
+        /// enqueues a counter bump; if the counter stops advancing for three consecutive checks the UI
+        /// thread is considered gone — most plausibly a WinUI stowed exception killed it while background
+        /// threads kept running — and the failure is logged at ERROR level so post-mortems can pinpoint
+        /// the moment it happened even though nothing on the UI side can log anymore.
+        /// </summary>
+        private static void StartUiWatchdog()
+        {
+            if (_uiWatchdogTimer is not null)
+                return;
+
+            Interlocked.Exchange(ref _uiWatchdogStopping, 0);
+            Interlocked.Exchange(ref _uiWatchdogRestartRequested, 0);
+            Interlocked.Exchange(ref _uiHeartbeat, 0);
+            Interlocked.Exchange(ref _uiHeartbeatObserved, -1);
+            Interlocked.Exchange(ref _uiHeartbeatMisses, 0);
+            _uiWatchdogTimer = new System.Threading.Timer(_ => UiWatchdogTick(),
+                null,
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(5));
+        }
+
+        private static void UiWatchdogTick()
+        {
+            if (Volatile.Read(ref _uiWatchdogStopping) != 0)
+                return;
+
+            try
+            {
+                try
+                {
+                    _dispatcher?.TryEnqueue(() => Interlocked.Increment(ref _uiHeartbeat));
+                }
+                catch (Exception ex)
+                {
+                    // Treat a queue/COM failure as a missed heartbeat and let the normal threshold logic
+                    // decide whether the dispatcher is unrecoverable.
+                    Log.Warning(ex, "UI watchdog could not enqueue heartbeat");
+                }
+
+                int current = Interlocked.CompareExchange(ref _uiHeartbeat, 0, 0);
+                long observed = Interlocked.Read(ref _uiHeartbeatObserved);
+                if (observed != current)
+                {
+                    Interlocked.Exchange(ref _uiHeartbeatObserved, current);
+                    Interlocked.Exchange(ref _uiHeartbeatMisses, 0);
+                    return;
+                }
+
+                // Same value as last check: either the queue is idle-closed (TryEnqueue returned false
+                // forever) or the thread is gone. Three strikes ≈ 15 s of silence.
+                int misses = Interlocked.Increment(ref _uiHeartbeatMisses);
+                if (ShouldRestartUiWatchdog(
+                    misses,
+                    App.IsQuitting,
+                    Volatile.Read(ref _uiWatchdogRestartRequested) != 0)
+                    && Interlocked.CompareExchange(ref _uiWatchdogRestartRequested, 1, 0) == 0)
+                {
+                    Log.Error("UI thread stopped servicing heartbeats for ~15s; taskbar widget is dead until " +
+                              "the app is restarted (likely WinUI stowed exception, issue #70). Requesting " +
+                              "an automatic restart; background services are still running.");
+                    if (!RequestUiRestart())
+                    {
+                        // Do not leave the one-shot latch set after a failed spawn — later ticks must retry.
+                        Interlocked.Exchange(ref _uiWatchdogRestartRequested, 0);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // A closed DispatcherQueue or a failed restart request must not let the watchdog itself
+                // become another unhandled thread-pool exception.
+                Log.Warning(ex, "UI watchdog tick failed");
+            }
+        }
+
+        internal static bool ShouldRestartUiWatchdog(int misses, bool isQuitting, bool restartRequested)
+            => misses >= UiWatchdogMissLimit && !isQuitting && !restartRequested;
+
+        /// <summary>
+        /// Best-effort recovery for a dead dispatcher. <see cref="AppInstance.Restart"/> needs a foreground
+        /// window and will not return on success, so a tray-only widget with a wedged UI thread has to
+        /// unregister the single-instance key and start a replacement process itself.
+        /// Returns true when a new process was started (this process should then exit).
+        /// </summary>
+        private static bool RequestUiRestart()
+        {
+            try
+            {
+                var reason = AppInstance.Restart(StartupSettingsService.StartupArgument);
+                Log.Error($"UI watchdog AppInstance.Restart returned {reason}; falling back to a new process");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "UI watchdog AppInstance.Restart threw; falling back to a new process");
+            }
+
+            if (!TrySpawnReplacementProcess())
+            {
+                Log.Error("UI watchdog could not start a replacement process; will retry on the next miss streak");
+                return false;
+            }
+
+            Environment.Exit(1);
+            return true;
+        }
+
+        private static bool TrySpawnReplacementProcess()
+        {
+            var path = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                Log.Error("UI watchdog replacement path is missing");
+                return false;
+            }
+
+            try
+            {
+                AppInstance.GetCurrent().UnregisterKey();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "UI watchdog could not unregister the single-instance key");
+            }
+
+            try
+            {
+                var started = Process.Start(new ProcessStartInfo
+                {
+                    FileName = path,
+                    Arguments = StartupSettingsService.StartupArgument,
+                    UseShellExecute = false,
+                });
+                if (started is null)
+                {
+                    Log.Error("UI watchdog Process.Start returned null");
+                    return false;
+                }
+
+                Log.Error($"UI watchdog started replacement pid {started.Id}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "UI watchdog Process.Start failed");
+                return false;
+            }
+        }
 
         public static void Initialize(DispatcherQueue dispatcher, Action showMainWindow)
         {
             _dispatcher = dispatcher;
             _showMainWindow = showMainWindow;
+            StartUiWatchdog();
 
             CreateTrayIcon();
             ApplySurfaceFromSettings();
@@ -82,6 +251,7 @@ namespace TaskbarQuota.Taskbar
                     || TaskBarWidget.IsAnyUserRepositioning
                     || _floatingWindow?.IsDragging == true;
                 WidgetSettingsService.Changed += OnWidgetSettingsChanged;
+                ProviderDisplayOrderService.Changed += OnWidgetSettingsChanged;
                 App.Quitting += OnQuitting;
                 // Installed from the UI thread on purpose: WINEVENT_OUTOFCONTEXT callbacks arrive through
                 // that thread's message pump, which this one has and background threads do not.
@@ -198,7 +368,8 @@ namespace TaskbarQuota.Taskbar
                 return false;
 
             var coordinator = UsageCoordinator.Instance;
-            var providers = coordinator.WidgetDisplayProviders;
+            var providers = ProviderDisplayOrderService.Sort(coordinator.WidgetDisplayProviders
+                .Take(UsageCoordinator.MaxDisplayedWidgetTiles));
             var activity = AgentActivityService.Instance.Snapshot;
 
             _floatingWindow.SetActivitySnapshot(activity);
@@ -223,7 +394,8 @@ namespace TaskbarQuota.Taskbar
                 return;
 
             var coordinator = UsageCoordinator.Instance;
-            var providers = coordinator.WidgetDisplayProviders;
+            var providers = ProviderDisplayOrderService.Sort(coordinator.WidgetDisplayProviders
+                .Take(UsageCoordinator.MaxDisplayedWidgetTiles));
 
             bool needsFetch = false;
             foreach (var provider in providers)
@@ -304,11 +476,28 @@ namespace TaskbarQuota.Taskbar
                 () => ToggleActivityFlyout(anchorHandle: null, selectedActivityId: null)));
             var move = new PopupMenuItem(UiText.Get("Move usage widget"), (_, _) => _dispatcher?.TryEnqueue(StartMoveActiveSurface));
             var reset = new PopupMenuItem(UiText.Get("Reset widget positions"), (_, _) => _dispatcher?.TryEnqueue(ResetActiveSurfacePositions));
-            var quit = new PopupMenuItem(UiText.Get("Quit"), (_, _) => _dispatcher?.TryEnqueue(App.Quit));
-            _trayMenu = new PopupMenu
+            // Always reachable escape hatch: a click-through floating window cannot be right-clicked.
+            _clickThroughMenuItem = new PopupMenuItem(
+                UiText.Get("Floating widget click-through (hold Ctrl to interact)"),
+                (_, _) => _dispatcher?.TryEnqueue(
+                    () => WidgetSettingsService.ApplyFloatingClickThrough(!WidgetSettingsService.FloatingClickThrough)))
             {
-                Items = { open, activity, new PopupMenuSeparator(), move, reset, new PopupMenuSeparator(), quit },
+                Checked = WidgetSettingsService.FloatingClickThrough,
             };
+            var quit = new PopupMenuItem(UiText.Get("Quit"), (_, _) => _dispatcher?.TryEnqueue(App.Quit));
+
+            try
+            {
+                _trayMenu = new PopupMenu
+                {
+                    Items = { open, activity, new PopupMenuSeparator(), move, reset, _clickThroughMenuItem, new PopupMenuSeparator(), quit },
+                };
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Tray context menu could not be created");
+                _trayMenu = null;
+            }
 
             var icon = LoadTrayIcon();
 
@@ -472,8 +661,8 @@ namespace TaskbarQuota.Taskbar
                 RefreshPinnedTiles();
                 // The free span is only known once a widget has measured it, so a set pinned before that
                 // (or pinned when the bar was emptier) is reconciled here rather than rendering badly.
-                // EnforceBudget early-outs when neither the span nor the pinned set has moved, which is
-                // every tick but the few that follow a real change.
+                // EnforceBudget only returns providers that should be held back; it never clears a
+                // persisted pin preference because of a transient geometry report.
                 Services.PinBudgetService.EnforceBudget();
                 // Re-run the tile-fit math against the gap the last position pass measured, so tiles that
                 // were trimmed off a crowded taskbar come back once there is room for them again.
@@ -489,7 +678,7 @@ namespace TaskbarQuota.Taskbar
             _widgetHealthTimer.Start();
         }
 
-        private static void EnsureWidgets()
+        private static void EnsureWidgets(IReadOnlyList<TaskbarWindowTarget>? confirmedTargets = null)
         {
             if (IsFloatingSurface)
                 return;
@@ -500,11 +689,15 @@ namespace TaskbarQuota.Taskbar
             _isReconcilingWidgets = true;
             try
             {
-                if (!TaskbarWindowTarget.TryFindAll(out var targets))
+                var targets = confirmedTargets;
+                if (targets is null && !TaskbarWindowTarget.TryFindAll(out targets))
                 {
                     Log.Warning("Could not enumerate Windows taskbars; keeping existing widgets until the next health check");
                     return;
                 }
+                RememberDisplayIdentities(targets);
+                if (confirmedTargets is not null || TopologyStability.Observe(GetTopologySignature(targets)))
+                    MigratePersistedDisplayKeys();
                 var targetsByHandle = targets.ToDictionary(target => target.Handle);
 
                 foreach (var pair in Widgets.ToArray())
@@ -626,18 +819,21 @@ namespace TaskbarQuota.Taskbar
                     WidgetSettingsService.IsProviderPinned);
             }
 
-            return TaskbarContentRouter.ProvidersForDisplay(
+            // Select pins and route/cap first, then arrange the resulting tiles. A preferred position
+            // for an unpinned active provider must not evict a pin when the display is full.
+            return ProviderDisplayOrderService.Sort(TaskbarContentRouter.ProvidersForDisplay(
                 providers,
                 mode,
-                WidgetSettingsService.SelectedTaskbarDisplayKey,
+                ResolveDisplayKey(WidgetSettingsService.SelectedTaskbarDisplayKey) ?? string.Empty,
                 widget.DisplayKey,
                 primary,
                 available,
                 provider => displayActive == provider
                     ? widget.DisplayKey
-                    : WidgetSettingsService.GetAdaptiveProviderDisplay(provider),
+                    : ResolveDisplayKey(WidgetSettingsService.GetAdaptiveProviderDisplay(provider)),
                 WidgetSettingsService.IsProviderPinned,
-                WidgetSettingsService.GetPinnedProviderDisplay);
+                provider => ResolveDisplayKey(WidgetSettingsService.GetPinnedProviderDisplay(provider)),
+                UsageCoordinator.MaxDisplayedWidgetTiles));
         }
 
         private static ProviderId? ActiveProviderForWidget(
@@ -657,15 +853,69 @@ namespace TaskbarQuota.Taskbar
                 displayKey,
                 hwnd => User32.IsWindow(hwnd)
                     && string.Equals(
-                        TaskbarWindowTarget.GetDisplayKeyForWindow(hwnd),
+                        TaskbarWindowTarget.GetDisplayKeyForWindow(hwnd, DisplayTargets),
                         displayKey,
                         StringComparison.OrdinalIgnoreCase));
 
         internal static bool ShouldRemoveMissingTaskbar(int consecutiveMisses, bool hostAlive)
             => !hostAlive || consecutiveMisses >= 2;
 
+        private static void RememberDisplayIdentities(IReadOnlyList<TaskbarWindowTarget> targets)
+        {
+            DisplayTargets = targets;
+            var identities = new DisplayIdentity[targets.Count];
+            for (int i = 0; i < targets.Count; i++)
+                identities[i] = targets[i].ToIdentity();
+            DisplayIdentities = identities;
+        }
+
+        private static string? ResolveDisplayKey(string? key)
+        {
+            if (string.IsNullOrWhiteSpace(key)
+                || key == WidgetSettingsService.AllDisplaysPinDestination
+                || DisplayIdentities.Count == 0)
+            {
+                return key;
+            }
+
+            return TaskbarWindowTarget.ResolvePersistedDisplayKey(key, DisplayIdentities);
+        }
+
+        private static void MigratePersistedDisplayKeys()
+        {
+            if (DisplayIdentities.Count == 0)
+                return;
+
+            if (WidgetSettingsService.CurrentTaskbarPlacement == TaskbarPlacementMode.SelectedDisplay
+                && TaskbarWindowTarget.TryMigratePersistedKey(
+                    WidgetSettingsService.SelectedTaskbarDisplayKey,
+                    DisplayIdentities,
+                    out string selected))
+            {
+                Log.Information(
+                    $"Migrated selected taskbar display {WidgetSettingsService.SelectedTaskbarDisplayKey} -> {selected}");
+                WidgetSettingsService.ApplyTaskbarPlacement(TaskbarPlacementMode.SelectedDisplay, selected);
+            }
+
+            foreach (ProviderId provider in Enum.GetValues<ProviderId>())
+            {
+                string? pinned = WidgetSettingsService.GetPinnedProviderDisplay(provider);
+                if (pinned is null || pinned == WidgetSettingsService.AllDisplaysPinDestination)
+                    continue;
+                if (!TaskbarWindowTarget.TryMigratePersistedKey(pinned, DisplayIdentities, out string resolved))
+                    continue;
+
+                Log.Information($"Migrated pinned display for {provider}: {pinned} -> {resolved}");
+                WidgetSettingsService.SetPinnedProviderDisplay(provider, resolved);
+            }
+        }
+
         private static void OnTopologyChanged(TopologyChange change)
             => _dispatcher?.TryEnqueue(() => ScheduleTopologyRecovery(change));
+
+        // A tile that hit a XAML layout cycle stops redrawing while still accepting results.
+        public static void RebuildAfterLayoutFailure()
+            => OnTopologyChanged(new TopologyChange(TopologyChangeKind.LayoutFailure, "layout cycle"));
 
         private static void ScheduleTopologyRecovery(TopologyChange change)
         {
@@ -725,10 +975,7 @@ namespace TaskbarQuota.Taskbar
                 return false;
             }
 
-            string signature = string.Join(
-                "|",
-                targets.Select(target => $"{target.Handle.ToInt64():X}:{target.DisplayKey}:{target.IsPrimary}"));
-            if (!TopologyStability.Observe(signature))
+            if (!TopologyStability.Observe(GetTopologySignature(targets)))
                 return false;
 
             if (_topologyForceReset)
@@ -739,7 +986,8 @@ namespace TaskbarQuota.Taskbar
                 _topologyForceReset = false;
             }
 
-            EnsureWidgets();
+            // Reconcile and migrate against the exact snapshot that passed the stability check.
+            EnsureWidgets(targets);
             SyncWidgetState();
 
             return targets.All(target =>
@@ -760,6 +1008,10 @@ namespace TaskbarQuota.Taskbar
             _topologyRecoveryReason = string.Empty;
         }
 
+        private static string GetTopologySignature(IReadOnlyList<TaskbarWindowTarget> targets)
+            => string.Join("|", targets.Select(target =>
+                $"{target.Handle.ToInt64():X}:{target.DisplayKey}:{target.GdiDeviceName}:{target.IsPrimary}"));
+
         private static AgentActivitySnapshot ActivityForWidget(
             TaskBarWidget widget,
             AgentActivitySnapshot snapshot)
@@ -772,13 +1024,13 @@ namespace TaskbarQuota.Taskbar
             return TaskbarContentRouter.ActivityForDisplay(
                 snapshot,
                 WidgetSettingsService.CurrentTaskbarPlacement,
-                WidgetSettingsService.SelectedTaskbarDisplayKey,
+                ResolveDisplayKey(WidgetSettingsService.SelectedTaskbarDisplayKey) ?? string.Empty,
                 widget.DisplayKey,
                 primary,
                 available,
-                WidgetSettingsService.GetAdaptiveProviderDisplay,
+                provider => ResolveDisplayKey(WidgetSettingsService.GetAdaptiveProviderDisplay(provider)),
                 WidgetSettingsService.IsProviderPinned,
-                WidgetSettingsService.GetPinnedProviderDisplay);
+                provider => ResolveDisplayKey(WidgetSettingsService.GetPinnedProviderDisplay(provider)));
         }
 
         private static void SyncWidgetState()
@@ -875,7 +1127,9 @@ namespace TaskbarQuota.Taskbar
 
             foreach (var provider in providers)
             {
-                if (provider != coordinator.ActiveProvider)
+                // Disabled providers must not leak fetches through adaptive history either.
+                if (provider != coordinator.ActiveProvider
+                    && !ProviderDiscoveryService.IsExplicitlyDisabled(provider))
                     _ = coordinator.RefreshWidgetProviderAsync(provider);
             }
         }
@@ -1082,7 +1336,7 @@ namespace TaskbarQuota.Taskbar
 
         private static void OnProviderWindowObserved(ProviderId provider, IntPtr hwnd)
         {
-            string displayKey = TaskbarWindowTarget.GetDisplayKeyForWindow(hwnd);
+            string displayKey = TaskbarWindowTarget.GetDisplayKeyForWindow(hwnd, DisplayTargets);
             if (displayKey.Length == 0)
                 return;
 
@@ -1096,7 +1350,7 @@ namespace TaskbarQuota.Taskbar
             if (AdaptiveDisplayProviders.GetProviderForWindow(hwnd) is not { } provider)
                 return;
 
-            string displayKey = TaskbarWindowTarget.GetDisplayKeyForWindow(hwnd);
+            string displayKey = TaskbarWindowTarget.GetDisplayKeyForWindow(hwnd, DisplayTargets);
             if (displayKey.Length != 0)
                 RecordAdaptiveProviderDisplay(provider, displayKey, hwnd);
         }
@@ -1139,6 +1393,8 @@ namespace TaskbarQuota.Taskbar
         {
             _dispatcher?.TryEnqueue(() =>
             {
+                if (_clickThroughMenuItem is not null)
+                    _clickThroughMenuItem.Checked = WidgetSettingsService.FloatingClickThrough;
                 ConfigureActivityTimer();
                 if (WidgetSettingsService.CurrentSurface != _activeSurface)
                     ApplySurfaceFromSettings();
@@ -1157,7 +1413,11 @@ namespace TaskbarQuota.Taskbar
             UsageCoordinator.Instance.ProviderForegroundChanged -= OnProviderForegroundChanged;
             UsageCoordinator.Instance.IsOwnUiEngaged = null;
             WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
+            ProviderDisplayOrderService.Changed -= OnWidgetSettingsChanged;
             _initialized = false;
+            Interlocked.Exchange(ref _uiWatchdogStopping, 1);
+            _uiWatchdogTimer?.Dispose();
+            _uiWatchdogTimer = null;
             _widgetHealthTimer?.Stop();
             _widgetHealthTimer = null;
             _topologyRecoveryTimer?.Stop();

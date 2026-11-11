@@ -44,6 +44,8 @@ namespace TaskbarQuota
         private bool _applyingBounds;
         private bool _suppressSurfaceControlEvents;
         private DispatcherQueueTimer? _boundsUpdateTimer;
+        private readonly DispatcherQueueTimer _activityElapsedTimer;
+        private readonly List<(TextBlock Text, AgentActivityItem Item)> _activityMetadataBlocks = new();
         private RectInt32? _lastAppliedBounds;
         private double _lastObservedScale = -1;
         private readonly DashboardViewModel _dashboardViewModel;
@@ -69,6 +71,11 @@ namespace TaskbarQuota
             ProviderStrip.Loaded += (_, _) => RebuildProviderStrip();
             WidgetSettingsService.Changed += OnWidgetSettingsChanged;
             AgentActivityService.Instance.Changed += OnActivityChanged;
+            // Status durations ("Idle · 12m") tick on their own; refresh just those labels between scans.
+            _activityElapsedTimer = DispatcherQueue.CreateTimer();
+            _activityElapsedTimer.Interval = TimeSpan.FromSeconds(30);
+            _activityElapsedTimer.Tick += (_, _) => RefreshActivityElapsed();
+            _activityElapsedTimer.Start();
 
             SystemBackdrop = new DesktopAcrylicBackdrop();
             ThemeService.Register(Root);
@@ -423,6 +430,8 @@ namespace TaskbarQuota
         private void RenderActivity(AgentActivitySnapshot snapshot)
         {
             ActivityList.Children.Clear();
+            _activityMetadataBlocks.Clear();
+            var now = DateTimeOffset.Now;
             var items = snapshot.ItemsForDisplay(_selectedActivityId);
             bool monitoringEnabled = WidgetSettingsService.EnableAgentActivityMonitoring;
             ActivityEmptyState.Text = monitoringEnabled ? UiText.Get("No recent agent activity") : "智能体活动监控已关闭";
@@ -444,7 +453,11 @@ namespace TaskbarQuota
                     BorderThickness = new Thickness(1),
                 };
                 var statusText = LocalizedActivityStatus(item.Status);
-                var accessibleName = $"{ActivityTitle(item)}，{ActivityProviderLabel(item)}，{statusText}。{item.Step}";
+                var statusDuration = item.StatusDurationText(now);
+                var accessibleStatus = statusDuration is null
+                    ? statusText
+                    : $"{statusText}，{UiText.FormatDuration(statusDuration)}";
+                var accessibleName = $"{ActivityTitle(item)}，{ActivityProviderLabel(item)}，{accessibleStatus}。{UiText.TranslateLabel(item.Step)}";
                 AutomationProperties.SetName(card, accessibleName);
                 AutomationProperties.SetAutomationId(card, $"AgentActivityCard_{ActivityList.Children.Count}");
                 if (item.Id == _selectedActivityId)
@@ -457,19 +470,21 @@ namespace TaskbarQuota
                 var row = new Grid { ColumnSpacing = 10 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 row.Children.Add(CreateActivityProviderVisual(item));
                 var text = new StackPanel { Spacing = 2 };
                 text.Children.Add(new TextBlock { Text = ActivityTitle(item), Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
-                var metadata = string.IsNullOrWhiteSpace(item.Model)
-                    ? $"{ActivityProviderLabel(item)} · {statusText}"
-                    : $"{ActivityProviderLabel(item)} · {item.Model} · {statusText}";
                 var mutedTextBrush = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
-                text.Children.Add(new TextBlock { Text = metadata, Foreground = mutedTextBrush, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
-                text.Children.Add(new TextBlock { Text = item.Step, Foreground = mutedTextBrush, TextTrimming = TextTrimming.CharacterEllipsis, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
+                var metadataBlock = new TextBlock { Text = ActivityMetadata(item, now), Foreground = mutedTextBrush, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] };
+                _activityMetadataBlocks.Add((metadataBlock, item));
+                text.Children.Add(metadataBlock);
+                text.Children.Add(new TextBlock { Text = UiText.TranslateLabel(item.Step), Foreground = mutedTextBrush, TextTrimming = TextTrimming.CharacterEllipsis, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
                 if (item.SubagentCount > 0)
                     text.Children.Add(new TextBlock { Text = $"▸ {item.SubagentCount} 个子智能体", Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
                 Grid.SetColumn(text, 1);
                 row.Children.Add(text);
+                if (CanDismissActivity(item))
+                    AddActivityDismissAffordances(card, row, item, ActivityTitle(item), ActivityList.Children.Count);
                 card.Child = row;
                 ActivityList.Children.Add(card);
             }
@@ -482,6 +497,77 @@ namespace TaskbarQuota
                     ActivityScrollViewer.Focus(FocusState.Programmatic);
                 });
             }
+        }
+
+        private static string ActivityMetadata(AgentActivityItem item, DateTimeOffset now)
+        {
+            var statusText = LocalizedActivityStatus(item.Status);
+            var status = item.StatusDurationText(now) is { } duration
+                ? $"{statusText} · {UiText.FormatDuration(duration)}"
+                : statusText;
+            return string.IsNullOrWhiteSpace(item.Model)
+                ? $"{ActivityProviderLabel(item)} · {status}"
+                : $"{ActivityProviderLabel(item)} · {item.Model} · {status}";
+        }
+
+        private void RefreshActivityElapsed()
+        {
+            if (!_shown || !_showingActivity)
+                return;
+            var now = DateTimeOffset.Now;
+            foreach (var (block, item) in _activityMetadataBlocks)
+                block.Text = ActivityMetadata(item, now);
+        }
+
+        // Working/Waiting sessions would reappear on the next scan, so only settled rows are dismissible.
+        private static bool CanDismissActivity(AgentActivityItem item)
+            => item.Status is not (AgentActivityStatus.Working or AgentActivityStatus.Waiting);
+
+        private static void AddActivityDismissAffordances(Border card, Grid row, AgentActivityItem item, string title, int index)
+        {
+            var id = item.Id;
+            var dismissName = $"忽略 {title}";
+            var dismissButton = new Button
+            {
+                Width = 28,
+                Height = 28,
+                MinWidth = 0,
+                MinHeight = 0,
+                Padding = new Thickness(0),
+                VerticalAlignment = VerticalAlignment.Top,
+                BorderThickness = new Thickness(0),
+                Background = new SolidColorBrush(Colors.Transparent),
+                Opacity = 0,
+                Content = new FontIcon
+                {
+                    Glyph = "",
+                    FontSize = 12,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                },
+            };
+            AutomationProperties.SetName(dismissButton, dismissName);
+            AutomationProperties.SetAutomationId(dismissButton, $"AgentActivityDismiss_{index}");
+            ToolTipService.SetToolTip(dismissButton, UiText.Get("Dismiss"));
+            dismissButton.Click += (_, _) => AgentActivityService.Instance.Dismiss(id);
+
+            // Keep the close X out of the way until the card is hovered or the button has keyboard focus.
+            bool hovered = false, focused = false;
+            void UpdateVisibility() => dismissButton.Opacity = hovered || focused ? 1 : 0;
+            card.PointerEntered += (_, _) => { hovered = true; UpdateVisibility(); };
+            card.PointerExited += (_, _) => { hovered = false; UpdateVisibility(); };
+            card.PointerCanceled += (_, _) => { hovered = false; UpdateVisibility(); };
+            dismissButton.GotFocus += (_, _) => { focused = true; UpdateVisibility(); };
+            dismissButton.LostFocus += (_, _) => { focused = false; UpdateVisibility(); };
+
+            Grid.SetColumn(dismissButton, 2);
+            row.Children.Add(dismissButton);
+
+            var dismissItem = new MenuFlyoutItem { Text = UiText.Get("Dismiss"), Icon = new FontIcon { Glyph = "" } };
+            AutomationProperties.SetName(dismissItem, dismissName);
+            dismissItem.Click += (_, _) => AgentActivityService.Instance.Dismiss(id);
+            var menu = new MenuFlyout();
+            menu.Items.Add(dismissItem);
+            card.ContextFlyout = menu;
         }
 
         private static string ActivityProviderDisplayName(ProviderId provider) => provider switch
@@ -849,9 +935,10 @@ namespace TaskbarQuota
                 item.Pin.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
 
             string? fixedDisplay = WidgetSettingsService.GetPinnedProviderDisplay(id);
+            TaskbarWindowTarget.TryFindAll(out var pinDisplays);
             string pinDescription = fixedDisplay is null
                 ? "已固定 — 跟随应用屏幕"
-                : $"已固定到 {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay)}";
+                : $"已固定到 {TaskbarWindowTarget.GetDisplayLabel(fixedDisplay, pinDisplays)}";
             ToolTipService.SetToolTip(button, pinned ? $"{displayName} — {pinDescription}" : displayName);
         }
 

@@ -141,7 +141,13 @@ namespace TaskbarQuota
             }
 
             _requestedProviderId = id;
+            bool providerIsKnown = hasDashboardCard
+                || _viewModel.AvailableCards.Any(card => card.ProviderId == id);
             _viewModel.SelectProvider(id);
+            // Never auto-enable an explicitly-disabled provider from navigation —
+            // only the Settings toggle opts back in.
+            if (!providerIsKnown && !ProviderDiscoveryService.IsExplicitlyDisabled(id))
+                _viewModel.EnableAvailableProvider(id);
             return true;
         }
 
@@ -184,38 +190,23 @@ namespace TaskbarQuota
         {
             IsSyncing = true;
             _providerGroup.MenuItems.Clear();
-            var allProviders = UsageCoordinator.Instance.Service.All;
-            var dashboardProviders = _viewModel.Cards
-                .Select(card => card.ProviderId)
-                .ToHashSet();
-            var availableProviders = _viewModel.AvailableCards
-                .Select(card => card.ProviderId)
-                .ToHashSet();
-            var navigationProviders = ComputeNavigationProviderIds(
-                allProviders.Select(provider => provider.Id).ToArray(),
-                dashboardProviders,
-                availableProviders,
-                WidgetSettingsService.IsProviderDashboardVisible,
-                WidgetSettingsService.AutoHideUnavailable);
-
-            foreach (var providerId in navigationProviders)
+            foreach (var card in _viewModel.Cards)
             {
-                var card = _viewModel.Cards.Concat(_viewModel.AvailableCards)
-                    .FirstOrDefault(candidate => candidate.ProviderId == providerId);
-                var provider = allProviders.FirstOrDefault(candidate => candidate.Id == providerId);
-                if (provider is null)
-                    continue;
-
-                var displayName = card?.DisplayName ?? provider.DisplayName;
                 var item = new NavigationViewItem
                 {
-                    Content = displayName,
-                    Tag = providerId,
-                    Icon = CreateProviderIcon(providerId),
+                    Content = card.DisplayName,
+                    Tag = card.ProviderId,
+                    Icon = CreateProviderIcon(card.ProviderId),
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
-                ApplyPinBadge(item, providerId, displayName);
+                ApplyPinBadge(item, card.ProviderId, card.DisplayName);
                 _providerGroup.MenuItems.Add(item);
+            }
+
+            if (_requestedProviderId is ProviderId requested
+                && !_viewModel.Cards.Any(card => card.ProviderId == requested))
+            {
+                _requestedProviderId = null;
             }
 
             SyncSelection();

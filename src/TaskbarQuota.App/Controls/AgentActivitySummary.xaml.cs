@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
 using TaskbarQuota.AgentActivity;
+using TaskbarQuota.Localization;
 using TaskbarQuota.Usage;
 using Windows.UI;
 
@@ -59,6 +60,15 @@ public sealed partial class AgentActivitySummary : UserControl
         Loaded += (_, _) => ApplyForeground();
         ActualThemeChanged += (_, _) => ApplyForeground();
         PointerWheelChanged += AgentActivitySummary_PointerWheelChanged;
+        Unloaded += (_, _) => StopAnimations();
+    }
+
+    internal void StopAnimations()
+    {
+        try { _selectionStoryboard?.Stop(); } catch { }
+        try { _appearanceStoryboard?.Stop(); } catch { }
+        _selectionStoryboard = null;
+        _appearanceStoryboard = null;
     }
 
     private void OpenActivityButton_Click(object sender, RoutedEventArgs e)
@@ -255,9 +265,9 @@ public sealed partial class AgentActivitySummary : UserControl
     {
         AgentActivityStatus.Completed => string.IsNullOrWhiteSpace(item.Step) || item.Step == "Completed"
             ? "任务已完成"
-            : Condense(item.Step),
+            : Condense(UiText.TranslateLabel(item.Step)),
         AgentActivityStatus.Failed => "任务需要处理",
-        _ => Condense(item.Step),
+        _ => Condense(UiText.TranslateLabel(item.Step)),
     };
 
     private static string ActivitySummary(IReadOnlyList<AgentActivityItem> items)

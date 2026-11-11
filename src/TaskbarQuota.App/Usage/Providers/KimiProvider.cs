@@ -145,7 +145,7 @@ namespace TaskbarQuota.Usage.Providers
             {
                 var monthlyPercent = Math.Min(100, Math.Max(0, sub.AmountUsedRatio.Value * 100));
                 var monthlyReset = ParseIsoDate(sub.ExpireTime);
-                var monthlyWindow = new RateWindow(monthlyPercent, resetAt: monthlyReset, label: "Monthly");
+                var monthlyWindow = new RateWindow(monthlyPercent, QuotaWindowLength.Monthly(monthlyReset), monthlyReset, label: "Monthly");
                 snapshot.Usage.ExtraRateWindows.Add(new NamedRateWindow("kimi-monthly", "Monthly", monthlyWindow));
             }
 
@@ -243,7 +243,7 @@ namespace TaskbarQuota.Usage.Providers
             // Kimi's rate limit is a rolling five-hour window, so it is the session-style
             // primary row. The coding-plan quota is the seven-day weekly secondary row.
             var weeklyWindow = weekly != null
-                ? MakeRateWindow(weekly, resetDescription: $"{ParseInt(weekly.Used)}/{ParseInt(weekly.Limit)} requests")
+                ? MakeRateWindow(weekly, windowMinutes: QuotaWindowLength.Weekly, resetDescription: $"{ParseInt(weekly.Used)}/{ParseInt(weekly.Limit)} requests")
                 : new RateWindow(0, resetDescription: "No usage data");
             RateWindow? rateLimitWindow = null;
             if (rateLimit != null)

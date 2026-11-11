@@ -55,8 +55,7 @@ internal static class ProviderInstallDetector
         ProviderId.Codex => IsCliAvailable("codex") || File.Exists(CodexAuthPath()),
         ProviderId.Grok => IsCliAvailable("grok") || File.Exists(GrokAuthPath()),
         ProviderId.Claude => IsCliAvailable("claude")
-            || File.Exists(ClaudeCredentialsPath())
-            || IsDesktopAppInstalled("Claude"),
+            || IsClaudeInstalledWithoutCli(),
         ProviderId.Devin => IsCliAvailable("devin")
             || File.Exists(DevinCredentialsPath())
             || IsDevinAppInstalled(),
@@ -76,8 +75,7 @@ internal static class ProviderInstallDetector
         ProviderId.Antigravity => IsAntigravityInstalledWithoutCli(),
         ProviderId.Codex => File.Exists(CodexAuthPath()) || HasCachedCli("codex"),
         ProviderId.Grok => File.Exists(GrokAuthPath()) || HasCachedCli("grok"),
-        ProviderId.Claude => File.Exists(ClaudeCredentialsPath())
-            || IsDesktopAppInstalled("Claude")
+        ProviderId.Claude => IsClaudeInstalledWithoutCli()
             || HasCachedCli("claude"),
         ProviderId.Devin => File.Exists(DevinCredentialsPath())
             || IsDevinAppInstalled()
@@ -146,6 +144,19 @@ internal static class ProviderInstallDetector
 
     internal static string ClaudeCredentialsPath()
         => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
+
+    private static bool IsClaudeInstalledWithoutCli() => IsClaudeInstalledWithoutCli(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+
+    internal static bool IsClaudeInstalledWithoutCli(string userProfile, string localAppData, string appData)
+        // Desktop-managed Claude Code need not be on PATH or have a standalone CLI credential file.
+        // Keep this filesystem-only so the startup UI and warmed detector use the same cheap checks.
+        => File.Exists(Path.Combine(userProfile, ".claude", ".credentials.json"))
+            || File.Exists(Path.Combine(appData, "Claude", "config.json"))
+            || Directory.Exists(Path.Combine(localAppData, "AnthropicClaude"))
+            || Directory.Exists(Path.Combine(localAppData, "Programs", "Claude"));
 
     internal static string DevinCredentialsPath()
     {

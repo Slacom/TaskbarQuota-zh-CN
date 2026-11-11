@@ -51,18 +51,43 @@
                     <TextBlock Grid.Column="1" Text="{x:Bind PercentText}" Foreground="{x:Bind PercentForeground}" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center"/>
                 </Grid>
 
-                <ProgressBar Grid.Column="1" Grid.Row="1"
-                             Value="{x:Bind Percent}"
-                             Maximum="100"
-                             Height="4"
-                             Foreground="{x:Bind BarBrush}"
-                             HorizontalAlignment="Stretch"/>
+                <Grid Grid.Column="1" Grid.Row="1" Visibility="{x:Bind BarVisibility}" MinHeight="10">
+                    <ProgressBar Value="{x:Bind Percent}"
+                                 Maximum="100"
+                                 Height="4"
+                                 VerticalAlignment="Center"
+                                 Foreground="{x:Bind BarBrush}"
+                                 HorizontalAlignment="Stretch"/>
+                    <!-- Even-pace tick: where usage would sit if burned evenly across the window. -->
+                    <Grid Visibility="{x:Bind TickVisibility}" IsHitTestVisible="False">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="{x:Bind TickBeforeWidth}"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="{x:Bind TickAfterWidth}"/>
+                        </Grid.ColumnDefinitions>
+                        <Rectangle Grid.Column="1" Width="2" Height="10" RadiusX="1" RadiusY="1"
+                                   Fill="{x:Bind TickBrush}" Opacity="0.85"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                </Grid>
 
-                <TextBlock Grid.Column="1" Grid.Row="2"
-                           Text="{x:Bind ResetText}"
-                           Visibility="{x:Bind ResetVisibility}"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                           Style="{StaticResource CaptionTextBlockStyle}"/>
+                <Grid Grid.Column="1" Grid.Row="2" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               Text="{x:Bind ResetText}"
+                               Visibility="{x:Bind ResetVisibility}"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                               Style="{StaticResource CaptionTextBlockStyle}"/>
+                    <TextBlock Grid.Column="1"
+                               Text="{x:Bind PaceText}"
+                               Visibility="{x:Bind PaceVisibility}"
+                               ToolTipService.ToolTip="{x:Bind PaceTooltip}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Style="{StaticResource CaptionTextBlockStyle}"/>
+                </Grid>
             </Grid>
         </DataTemplate>
 

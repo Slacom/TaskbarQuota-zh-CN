@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -34,12 +35,15 @@ namespace TaskbarQuota.Usage.Providers
 
         public async Task<ProviderFetchResult> FetchUsageAsync(CancellationToken ct = default)
         {
-            var appAuth = LoadCursorAppAuth();
+            var cliAuth = LoadCursorCliAuth();
+            var appAuth = LoadCursorAppAuth() is { AccessToken.Length: > 0 } desktop ? desktop : cliAuth;
             if (appAuth?.AccessToken is { Length: > 0 })
             {
                 try
                 {
-                    return await FetchUsageWithAppTokenAsync(appAuth, ct).ConfigureAwait(false);
+                    var fetch = await FetchUsageWithAppTokenAsync(appAuth, ct).ConfigureAwait(false);
+                    await TryAttachDashboardHistoryAsync(fetch.Usage, HistoryCookies(appAuth, cliAuth), ct).ConfigureAwait(false);
+                    return fetch;
                 }
                 catch (ProviderException)
                 {
@@ -64,7 +68,83 @@ namespace TaskbarQuota.Usage.Providers
             using (summary)
             using (me)
             {
-                return Build(summary.RootElement, me?.RootElement);
+                var fetch = Build(summary.RootElement, me?.RootElement);
+                await TryAttachDashboardHistoryAsync(fetch.Usage, new[] { cookie }, ct).ConfigureAwait(false);
+                return fetch;
+            }
+        }
+
+        /// <summary>
+        /// Cookies that can read the account-wide dashboard history, best first: a browser
+        /// session, then a session cookie built from the desktop app's or cursor-agent CLI's
+        /// login (how T3 Code reads it). The dashboard covers desktop, CLI and headless usage.
+        /// </summary>
+        private static IEnumerable<string> HistoryCookies(CursorAppAuth? appAuth, CursorAppAuth? cliAuth)
+        {
+            if (TryResolveCookieHeader() is { } browser)
+                yield return browser;
+            if (DashboardSessionCookie(appAuth?.AccessToken) is { } app)
+                yield return app;
+            if (cliAuth?.AccessToken != appAuth?.AccessToken && DashboardSessionCookie(cliAuth?.AccessToken) is { } cli)
+                yield return cli;
+        }
+
+        /// <summary>
+        /// cursor.com accepts <c>WorkosCursorSessionToken=&lt;userId&gt;::&lt;accessToken&gt;</c>, where the
+        /// user id is the last segment of the token's <c>sub</c> claim (e.g. <c>auth0|user_…</c>).
+        /// </summary>
+        internal static string? DashboardSessionCookie(string? accessToken)
+        {
+            if (string.IsNullOrWhiteSpace(accessToken))
+                return null;
+            var parts = accessToken.Split('.');
+            if (parts.Length < 2)
+                return null;
+            try
+            {
+                var payload = parts[1].Replace('-', '+').Replace('_', '/');
+                payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+                using var claims = JsonDocument.Parse(Convert.FromBase64String(payload));
+                if (!claims.RootElement.TryGetProperty("sub", out var sub) || sub.ValueKind != JsonValueKind.String)
+                    return null;
+                var userId = sub.GetString()!.Split('|')[^1];
+                return userId.Length == 0
+                    ? null
+                    : "WorkosCursorSessionToken=" + Uri.EscapeDataString($"{userId}::{accessToken.Trim()}");
+            }
+            catch (Exception ex) when (ex is FormatException or JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static async Task TryAttachDashboardHistoryAsync(
+            UsageSnapshot usage,
+            IEnumerable<string> cookies,
+            CancellationToken cancellationToken)
+        {
+            foreach (var cookie in cookies)
+            {
+                try
+                {
+                    usage.UsageHistory = await CursorUsageEventsClient.FetchHistoryAsync(
+                        cookie, DateTimeOffset.Now, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                catch (ProviderException ex) when (ex.Kind == ProviderErrorKind.AuthRequired)
+                {
+                    Diagnostics.Log.Debug("Cursor dashboard history rejected a credential; trying the next one.");
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    Diagnostics.Log.Debug("Cursor dashboard history unavailable: request timed out.");
+                    return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Diagnostics.Log.Debug($"Cursor dashboard history unavailable: {ex.Message}");
+                    return;
+                }
             }
         }
 
@@ -97,17 +177,20 @@ namespace TaskbarQuota.Usage.Providers
             }
         }
 
-        private string ResolveCookieHeader()
+        private static string ResolveCookieHeader()
+            => TryResolveCookieHeader() ?? throw new ProviderException(ProviderErrorKind.AuthRequired,
+                "未找到 Cursor Cookie。请通过 Edge/Chrome 登录，或在 credentials.json 中粘贴 Cookie 请求头。");
+
+        private static string? TryResolveCookieHeader()
         {
-            var manual = CredentialStore.Instance.ManualCookieHeader(Id);
+            var manual = CredentialStore.Instance.ManualCookieHeader(ProviderId.Cursor);
             if (manual != null) return manual;
             foreach (var d in CookieDomains)
             {
                 var header = CookieExtractor.GetCookieHeader(d);
                 if (!string.IsNullOrEmpty(header)) return header!;
             }
-            throw new ProviderException(ProviderErrorKind.AuthRequired,
-                "未找到 Cursor Cookie。请通过 Edge/Chrome 登录，或在 credentials.json 中粘贴 Cookie 请求头。");
+            return null;
         }
 
         private static async Task<JsonDocument> GetJson(string url, string cookie, CancellationToken ct)
@@ -181,10 +264,10 @@ namespace TaskbarQuota.Usage.Providers
             var auto = GetNum(plan, "autoPercentUsed");
             var api = GetNum(plan, "apiPercentUsed");
 
-            var usage = new UsageSnapshot(new RateWindow(total, null, billingEnd, resetDescription))
+            var usage = new UsageSnapshot(new RateWindow(total, QuotaWindowLength.Monthly(billingEnd), billingEnd, resetDescription))
             {
-                Secondary = auto is double autoPercent ? new RateWindow(NormalizePercent(autoPercent), null, billingEnd, resetDescription) : null,
-                ModelSpecific = api is double apiPercent ? new RateWindow(NormalizePercent(apiPercent), null, billingEnd, resetDescription) : null,
+                Secondary = auto is double autoPercent ? new RateWindow(DisplayPercent(autoPercent), QuotaWindowLength.Monthly(billingEnd), billingEnd, resetDescription) : null,
+                ModelSpecific = api is double apiPercent ? new RateWindow(apiPercent, QuotaWindowLength.Monthly(billingEnd), billingEnd, resetDescription) : null,
                 LoginMethod = PlanDisplay(auth.PlanType),
                 Email = auth.Email,
             };
@@ -225,12 +308,12 @@ namespace TaskbarQuota.Usage.Providers
                 double usedCents = GetNum(plan, "used") ?? 0;
                 double limitCents = (TryGetObject(plan, "breakdown", out var bd) ? GetNum(bd, "total") : null)
                                     ?? GetNum(plan, "limit") ?? 0;
-                percent = limitCents > 0 ? usedCents / limitCents * 100.0 : NormalizePercent(GetNum(plan, "totalPercentUsed") ?? 0);
+                percent = limitCents > 0 ? usedCents / limitCents * 100.0 : GetNum(plan, "totalPercentUsed") ?? 0;
 
                 if (GetNum(plan, "autoPercentUsed") is double auto)
-                    secondary = new RateWindow(NormalizePercent(auto), null, billingEnd, resetDescription);
+                    secondary = new RateWindow(DisplayPercent(auto), QuotaWindowLength.Monthly(billingEnd), billingEnd, resetDescription);
                 if (GetNum(plan, "apiPercentUsed") is double api)
-                    model = new RateWindow(NormalizePercent(api), null, billingEnd, resetDescription);
+                    model = new RateWindow(api, QuotaWindowLength.Monthly(billingEnd), billingEnd, resetDescription);
 
                 cost = OnDemandCost(usageScope, billingEnd)
                     ?? (TryGetObject(summary, "teamUsage", out var teamUsage) ? OnDemandCost(teamUsage, billingEnd) : null);
@@ -242,7 +325,7 @@ namespace TaskbarQuota.Usage.Providers
                 }
             }
 
-            var primary = new RateWindow(percent, null, billingEnd, resetDescription);
+            var primary = new RateWindow(percent, QuotaWindowLength.Monthly(billingEnd), billingEnd, resetDescription);
             var usage = new UsageSnapshot(primary) { Secondary = secondary, ModelSpecific = model, Cost = cost };
 
             var planText = FindString(summary, "membershipType", "planType", "planName", "plan", "subscriptionPlan")
@@ -288,6 +371,34 @@ namespace TaskbarQuota.Usage.Providers
             }
         }
 
+        /// <summary>
+        /// The cursor-agent CLI's saved login: <c>%APPDATA%\Cursor\auth.json</c> on Windows,
+        /// <c>$XDG_CONFIG_HOME/cursor/auth.json</c> elsewhere. Unused when the CLI runs from
+        /// <c>CURSOR_API_KEY</c>/<c>CURSOR_AUTH_TOKEN</c> instead of a saved login.
+        /// </summary>
+        private static CursorAppAuth? LoadCursorCliAuth()
+        {
+            var path = OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Cursor", "auth.json")
+                : Path.Combine(Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") is { Length: > 0 } xdg
+                    ? xdg
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"), "cursor", "auth.json");
+            try
+            {
+                if (!File.Exists(path)) return null;
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                string? Read(string name) => document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : null;
+                return Read("accessToken") is { Length: > 0 } token ? new CursorAppAuth(token, Read("refreshToken"), null, null) : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Diagnostics.Log.Debug($"Cursor CLI auth read failed: {ex.Message}");
+                return null;
+            }
+        }
+
         private static string? GetItem(SqliteConnection conn, string key)
         {
             using var cmd = conn.CreateCommand();
@@ -320,17 +431,18 @@ namespace TaskbarQuota.Usage.Providers
             };
         }
 
+        // Cursor displays any positive fractional usage as at least 1%.
+        private static double DisplayPercent(double value) => value > 0 && value < 1 ? 1 : value;
+
         private static string? GetStr(JsonElement e, string name)
             => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         private static DateTimeOffset? ParseDate(string? s)
             => s != null && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d) ? d : null;
 
-        private static double NormalizePercent(double value) => value is > 0 and <= 1 ? value * 100.0 : value;
-
         private static double PercentFromPlan(JsonElement plan, string percentName, string usedName, string limitName)
         {
             if (GetNum(plan, percentName) is double percent)
-                return NormalizePercent(percent);
+                return percent;
             var used = GetNum(plan, usedName) ?? 0;
             var limit = GetNum(plan, limitName) ?? 0;
             return limit > 0 ? used / limit * 100.0 : 0;

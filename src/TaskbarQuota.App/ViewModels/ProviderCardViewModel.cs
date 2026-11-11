@@ -29,6 +29,7 @@ namespace TaskbarQuota.ViewModels
         public string Label { get; }
         public double Percent { get; }
         public string PercentText { get; }
+        public Visibility BarVisibility { get; }
         public string ResetText { get; }
         public Visibility ResetVisibility { get; }
         public Brush BarBrush { get; }
@@ -36,6 +37,16 @@ namespace TaskbarQuota.ViewModels
         public bool IsWidgetVisible { get; internal set; }
         public bool IsWidgetToggleEnabled { get; internal set; }
         public string WidgetToggleName => $"在用量小组件中显示“{Label}”";
+
+        /// <summary>Even-pace tick position on the bar, in the same (used/remaining) terms as <see cref="Percent"/>.</summary>
+        public GridLength TickBeforeWidth { get; }
+        public GridLength TickAfterWidth { get; }
+        public Visibility TickVisibility { get; }
+        public Brush TickBrush { get; }
+        /// <summary>Short forecast status shown beside the reset time; the full projection is in <see cref="PaceTooltip"/>.</summary>
+        public string PaceText { get; }
+        public string PaceTooltip { get; }
+        public Visibility PaceVisibility { get; }
 
         public BarViewModel(
             ProviderId providerId,
@@ -45,16 +56,44 @@ namespace TaskbarQuota.ViewModels
             string? valueOverride = null,
             double? percentOverride = null)
         {
-            double displayPercent = percentOverride ?? WidgetSettingsService.DisplayPercent(w.UsedPercent);
+            bool included = w.IsIncluded;
+            double displayPercent = included
+                ? percentOverride ?? WidgetSettingsService.DisplayPercent(w.UsedPercent)
+                : 0;
             ProviderId = providerId;
             WidgetRowId = widgetRowId;
             Label = UiText.TranslateLabel(label);
-            Percent = displayPercent;
-            PercentText = valueOverride ?? WidgetSettingsService.FormatDisplayPercent(w.UsedPercent);
-            ResetText = w.ResetDescription is { } r ? UiText.FormatResetDescription(r) : string.Empty;
-            ResetVisibility = w.ResetDescription is null ? Visibility.Collapsed : Visibility.Visible;
+            Percent = included ? displayPercent : 0;
+            PercentText = valueOverride ?? (included
+                ? WidgetSettingsService.FormatDisplayPercent(w.UsedPercent)
+                : UiText.Get("Not included"));
+            BarVisibility = included ? Visibility.Visible : Visibility.Collapsed;
+            ResetText = included && w.ResetDescription is { } r
+                ? UiText.FormatResetDescription(r)
+                : string.Empty;
+            ResetVisibility = included && w.ResetDescription is not null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             BarBrush = Ui.UsageBrush(displayPercent);
-            PercentForeground = BarBrush;
+
+            var now = DateTimeOffset.UtcNow;
+            var pace = included
+                ? QuotaPacing.Evaluate(w, now, isSessionWindow: w.WindowMinutes is <= 360)
+                : QuotaPacing.Evaluate(new RateWindow(0), now);
+            if (pace.Severity != PaceSeverity.Untracked)
+                BarBrush = Ui.PaceBrush(pace.Severity);
+
+            bool hasTick = included && pace.IdealPacePercent is not null;
+            double tick = hasTick ? Math.Clamp(WidgetSettingsService.DisplayPercent(pace.IdealPacePercent!.Value), 0, 100) : 0;
+            TickVisibility = hasTick ? Visibility.Visible : Visibility.Collapsed;
+            TickBeforeWidth = new GridLength(tick, GridUnitType.Star);
+            TickAfterWidth = new GridLength(100 - tick, GridUnitType.Star);
+            TickBrush = Ui.Res("TextFillColorPrimaryBrush");
+            var paceText = included ? QuotaPacing.CardText(pace, now) : null;
+            PaceText = paceText ?? string.Empty;
+            PaceTooltip = included ? QuotaPacing.Tooltip(pace, now) ?? string.Empty : string.Empty;
+            PaceVisibility = paceText is null ? Visibility.Collapsed : Visibility.Visible;
+            PercentForeground = Ui.UsageBrush(displayPercent);
             IsWidgetVisible = WidgetSettingsService.IsRowVisible(providerId, widgetRowId);
             IsWidgetToggleEnabled = WidgetSettingsService.IsProviderVisible(providerId);
         }
@@ -298,7 +337,7 @@ namespace TaskbarQuota.ViewModels
                 var u = f.Usage;
                 if (r.Id == ProviderId.Zai && u.Pricing is { } pricing)
                 {
-                    PricingText = pricing.Display;
+                    PricingText = $"{UiText.TranslateLabel(pricing.Period)} · {pricing.MultiplierText}";
                     PricingBrush = Ui.Res(pricing.Period == "PEAK"
                         ? "SystemFillColorCautionBrush"
                         : "AccentFillColorSecondaryBrush");
@@ -394,7 +433,7 @@ namespace TaskbarQuota.ViewModels
                         AdditionalUsageOpacity = muted ? 0.55 : 1.0;
                     }
 
-                    if (r.Id == ProviderId.Codex && u.ResetCredits is { } resetCredits)
+                    if (u.ResetCredits is { } resetCredits)
                     {
                         ResetCreditsCountText = FormatAvailableResetCredits(resetCredits.AvailableCount);
                         ResetCreditsGrantedText = FormatResetCreditTimes(resetCredits.Credits, static c => c.GrantedAt);
@@ -459,9 +498,9 @@ namespace TaskbarQuota.ViewModels
                 : Visibility.Visible;
             EmailVisibility = string.IsNullOrEmpty(Email) ? Visibility.Collapsed : Visibility.Visible;
             CostVisibility = string.IsNullOrEmpty(CostText) ? Visibility.Collapsed : Visibility.Visible;
-            CreditVisibility = ShouldShowCreditCard(r.Id, CreditLeftText)
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            CreditVisibility = string.IsNullOrEmpty(CreditLeftText)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
             SourceVisibility = string.IsNullOrEmpty(SourceText) ? Visibility.Collapsed : Visibility.Visible;
             IsSetupRequired = !ok && r.ErrorKind == ProviderErrorKind.NotInstalled;
             IsOAuthLoginRequired = !ok && r.ErrorKind == ProviderErrorKind.AuthRequired
@@ -585,9 +624,6 @@ namespace TaskbarQuota.ViewModels
             _ => UiText.Get("Model"),
         };
 
-        internal static bool ShouldShowCreditCard(ProviderId providerId, string? creditLeftText)
-            => providerId != ProviderId.Codex && !string.IsNullOrEmpty(creditLeftText);
-
         internal static bool ShouldShowModelBreakdown(ProviderId providerId, int modelCount)
             => providerId != ProviderId.Codex && modelCount > 0;
     }
@@ -610,6 +646,15 @@ namespace TaskbarQuota.ViewModels
         /// <summary>Usage color from raw consumed percent, honoring percentage display mode.</summary>
         public static Brush UsageBrushFromUsed(double usedPercent)
             => CopyBrush(Res(WidgetSettingsService.GetUsageBrushResourceKey(usedPercent)));
+
+        /// <summary>Pace verdict color: accent while on course, caution close to the limit, critical when it will run out.</summary>
+        public static Brush PaceBrush(PaceSeverity severity)
+            => CopyBrush(Res(severity switch
+            {
+                PaceSeverity.Close => "SystemFillColorCautionBrush",
+                PaceSeverity.RunningOut or PaceSeverity.Spent => "SystemFillColorCriticalBrush",
+                _ => "AccentFillColorDefaultBrush",
+            }));
 
         /// <summary>Consumed-meter color (credits), always using consumed thresholds.</summary>
         public static Brush ConsumedUsageBrush(double consumedPercent)

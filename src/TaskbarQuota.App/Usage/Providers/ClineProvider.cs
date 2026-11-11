@@ -307,7 +307,14 @@ namespace TaskbarQuota.Usage.Providers
                 var type = item.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
                 double used = item.TryGetProperty("percentUsed", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetDouble() : 0;
                 var resetAt = ParseDate(item, "resetsAt");
-                var window = new RateWindow(used, windowMinutes: null, resetAt: resetAt,
+                int? windowMinutes = type switch
+                {
+                    "five_hour" => QuotaWindowLength.FiveHours,
+                    "weekly" => QuotaWindowLength.Weekly,
+                    "monthly" => QuotaWindowLength.Monthly(resetAt),
+                    _ => null,
+                };
+                var window = new RateWindow(used, windowMinutes: windowMinutes, resetAt: resetAt,
                     resetDescription: CodexProvider.FormatResetCountdown(resetAt));
 
                 switch (type)

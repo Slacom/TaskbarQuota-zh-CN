@@ -81,11 +81,24 @@ namespace TaskbarQuota.Usage.Providers
                     : WithUsedPercent(secondary, hs);
             }
 
-            // OpenAI temporarily disabled the 5h session limit (issue #18), so the API now returns a single
-            // weekly window that would otherwise render under the "Session" label. When the only window we
-            // have is the weekly one, relabel it "Weekly" — the value and reset time are already correct.
-            if (secondary == null && hasPrimary && IsWeeklyWindow(primary))
-                primary = WithLabel(primary, "Weekly");
+            // OpenAI temporarily disabled the 5h session limit (issue #18), so the API may return a single
+            // long window that would otherwise render under the "Session" label. Free plans use a ~30-day
+            // window; Plus/Pro weekly-only plans use ~7 days. Relabel from duration so Free is not "Weekly".
+            if (secondary == null && hasPrimary)
+            {
+                if (IsMonthlyWindow(primary))
+                    primary = WithLabel(primary, "Monthly");
+                else if (IsWeeklyWindow(primary))
+                    primary = WithLabel(primary, "Weekly");
+            }
+
+            // Codex leaves used_percent at 0 until the agent is actually used, while still advertising a
+            // far-future reset_at (often ~full period remaining, e.g. "29d 23h" on Free). That countdown is
+            // a phantom until quota is consumed — including after a real reset, which also returns 0% until
+            // the next use. Clear the subtitle for UI; keep ResetAt for replenishment math.
+            primary = ClearUnusedReset(primary);
+            if (secondary != null) secondary = ClearUnusedReset(secondary);
+            if (codeReview != null) codeReview = ClearUnusedReset(codeReview);
 
             var usage = new UsageSnapshot(primary) { HasPrimaryWindow = hasPrimary };
             if (secondary != null) usage.Secondary = secondary;
@@ -103,6 +116,10 @@ namespace TaskbarQuota.Usage.Providers
                 usage.Email = emailEl.GetString();
 
             usage.Cost = ExtractCredits(json, headerCredits);
+            // Business accounts with only a spend cap report has_credits=true but balance=null, which
+            // would render a misleading "0 credits" line next to the real monthly cap (issue #102).
+            if (primaryOpt != null && IsSpendControlOnly(json) && headerCredits is null && !HasNumericCreditBalance(json))
+                usage.Cost = null;
             usage.ResetCredits = ExtractResetCredits(resetCreditsJson);
 
             return new ProviderFetchResult(usage, "oauth");
@@ -195,7 +212,48 @@ namespace TaskbarQuota.Usage.Providers
                 return (p, s, cr);
             }
 
-            return (null, null, null);
+            // Business plans report rate_limit: null and expose the admin-set monthly per-user cap under
+            // spend_control.individual_limit instead. See github issue #102.
+            return (ParseSpendControlWindow(json), null, null);
+        }
+
+        private static bool IsSpendControlOnly(JsonElement json)
+            => !(json.TryGetProperty("rate_limit", out var rl) && rl.ValueKind == JsonValueKind.Object);
+
+        private static bool HasNumericCreditBalance(JsonElement json)
+            => json.TryGetProperty("credits", out var credits) &&
+               credits.ValueKind == JsonValueKind.Object &&
+               TryF64(credits, "balance") is not null;
+
+        private static RateWindow? ParseSpendControlWindow(JsonElement json)
+        {
+            if (!json.TryGetProperty("spend_control", out var spend) || spend.ValueKind != JsonValueKind.Object ||
+                !spend.TryGetProperty("individual_limit", out var limit) || limit.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            double? used = TryF64(limit, "used_percent");
+            if (used is null)
+            {
+                double? amountUsed = TryF64(limit, "used");
+                double? amountLimit = TryF64(limit, "limit");
+                if (amountUsed is double u && amountLimit is double l && l > 0)
+                    used = u / l * 100;
+            }
+            if (used is null)
+                return null;
+
+            DateTimeOffset? resetAt = null;
+            if (limit.TryGetProperty("reset_at", out var ra) && ra.ValueKind == JsonValueKind.Number && ra.TryGetInt64(out var ts))
+                resetAt = DateTimeOffset.FromUnixTimeSeconds(ts);
+            else if (limit.TryGetProperty("reset_at", out var raStr) && raStr.ValueKind == JsonValueKind.String && long.TryParse(raStr.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var tsStr))
+                resetAt = DateTimeOffset.FromUnixTimeSeconds(tsStr);
+            else if (TryF64(limit, "reset_after_seconds") is double after)
+                resetAt = DateTimeOffset.UtcNow.AddSeconds(after);
+
+            // The cap is a monthly allowance; a ~30-day window makes BuildResult label it "Monthly".
+            return new RateWindow(Math.Clamp(used.Value, 0, 100), 30 * 1440, resetAt, FormatResetCountdown(resetAt));
         }
 
         private static void AddAdditionalRateLimits(JsonElement json, UsageSnapshot usage, string? planType)
@@ -222,9 +280,9 @@ namespace TaskbarQuota.Usage.Providers
                     continue;
 
                 if (rl.TryGetProperty("primary_window", out var primary) && primary.ValueKind == JsonValueKind.Object)
-                    usage.ExtraRateWindows.Add(new NamedRateWindow($"{shortName}-session", $"{shortName} Session", ParseWindow(primary)));
+                    usage.ExtraRateWindows.Add(new NamedRateWindow($"{shortName}-session", $"{shortName} Session", ClearUnusedReset(ParseWindow(primary))));
                 if (rl.TryGetProperty("secondary_window", out var secondary) && secondary.ValueKind == JsonValueKind.Object)
-                    usage.ExtraRateWindows.Add(new NamedRateWindow($"{shortName}-weekly", $"{shortName} Weekly", ParseWindow(secondary)));
+                    usage.ExtraRateWindows.Add(new NamedRateWindow($"{shortName}-weekly", $"{shortName} Weekly", ClearUnusedReset(ParseWindow(secondary))));
             }
         }
 
@@ -241,12 +299,14 @@ namespace TaskbarQuota.Usage.Providers
         {
             double used = TryF64(window, "used_percent") ?? TryF64(window, "usage_percent") ?? 0;
             int? minutes = null;
-            if (window.TryGetProperty("limit_window_seconds", out var lw) && lw.TryGetInt64(out var secs))
+            if (window.TryGetProperty("limit_window_seconds", out var lw) && lw.ValueKind == JsonValueKind.Number && lw.TryGetInt64(out var secs))
                 minutes = (int)(secs / 60);
 
             DateTimeOffset? resetAt = null;
-            if (window.TryGetProperty("reset_at", out var ra) && ra.TryGetInt64(out var ts))
+            if (window.TryGetProperty("reset_at", out var ra) && ra.ValueKind == JsonValueKind.Number && ra.TryGetInt64(out var ts))
                 resetAt = DateTimeOffset.FromUnixTimeSeconds(ts);
+            else if (window.TryGetProperty("reset_at", out var raStr) && raStr.ValueKind == JsonValueKind.String && long.TryParse(raStr.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var tsStr))
+                resetAt = DateTimeOffset.FromUnixTimeSeconds(tsStr);
 
             return new RateWindow(used, minutes, resetAt, FormatResetCountdown(resetAt));
         }
@@ -255,13 +315,34 @@ namespace TaskbarQuota.Usage.Providers
             => new(usedPercent, window.WindowMinutes, window.ResetAt, window.ResetDescription, window.Label);
 
         private static RateWindow WithLabel(RateWindow window, string label)
-            => new(window.UsedPercent, window.WindowMinutes, window.ResetAt, window.ResetDescription, label);
+            => new(window.UsedPercent, window.WindowMinutes, window.ResetAt, window.ResetDescription, label)
+            {
+                IsIncluded = window.IsIncluded,
+            };
 
-        // A weekly window spans ~7 days. Treat an unknown duration as weekly too: when only one window is
-        // present the 5h session has been dropped, so the lone window is the weekly one. A window shorter
-        // than a day is still a real session window and keeps its "Session" label.
+        // Hide the reset subtitle at 0%. Codex does not populate used_percent until the agent is used, so
+        // 0% means "not started" (or "reset and idle"), not "N days remaining".
+        private static RateWindow ClearUnusedReset(RateWindow window)
+            => window.UsedPercent > 0
+                ? window
+                : new RateWindow(window.UsedPercent, window.WindowMinutes, window.ResetAt, resetDescription: null, window.Label)
+                {
+                    IsIncluded = window.IsIncluded,
+                };
+
+        // Free ChatGPT/Codex plans expose a ~30-day primary window (limit_window_seconds ≈ 2592000).
+        // Threshold below true calendar-month length so a 20+ day lone window is still labeled Monthly.
+        private const int MonthlyWindowMinutes = 20 * 1440;
+
+        private static bool IsMonthlyWindow(RateWindow window)
+            => window.WindowMinutes is int minutes && minutes >= MonthlyWindowMinutes;
+
+        // A weekly window spans ~7 days (below the monthly threshold). Treat an unknown duration as weekly
+        // too: when only one window is present the 5h session has been dropped, so the lone window is the
+        // weekly one. A window shorter than a day is still a real session window and keeps its "Session" label.
         private static bool IsWeeklyWindow(RateWindow window)
-            => window.WindowMinutes is not int minutes || minutes >= 1440;
+            => !IsMonthlyWindow(window)
+                && (window.WindowMinutes is not int minutes || minutes >= 1440);
 
         private static CostSnapshot? ExtractCredits(JsonElement json, double? headerCredits)
         {

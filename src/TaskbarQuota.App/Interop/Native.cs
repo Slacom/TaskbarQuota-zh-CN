@@ -126,6 +126,9 @@ namespace TaskbarQuota.Interop
         [DllImport("user32.dll")]
         public static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll")]
+        public static extern int GetSystemMetrics(int nIndex);
+
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr GetForegroundWindow();
 
@@ -221,6 +224,18 @@ namespace TaskbarQuota.Interop
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, EntryPoint = "GetMonitorInfo")]
         public static extern bool GetMonitorInfo([In] IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+        public const uint MONITORINFOF_PRIMARY = 1;
+        public const uint EDD_GET_DEVICE_INTERFACE_NAME = 1;
+        public const uint DISPLAY_DEVICE_ACTIVE = 1;
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumDisplayDevices(
+            string? lpDevice,
+            uint iDevNum,
+            ref DISPLAY_DEVICE lpDisplayDevice,
+            uint dwFlags);
     }
 
     public static class WtsApi32
@@ -240,6 +255,7 @@ namespace TaskbarQuota.Interop
     {
         public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         public const int DWMWA_CLOAK = 13;
+        public const int DWMWA_CLOAKED = 14;
 
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(
@@ -254,6 +270,13 @@ namespace TaskbarQuota.Interop
             int attribute,
             ref int value,
             int valueSize);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(
+            IntPtr hwnd,
+            int attribute,
+            out int pfAttribute,
+            int cbAttribute);
     }
 
     public enum DwmWindowCornerPreference
@@ -299,6 +322,30 @@ namespace TaskbarQuota.Interop
         };
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    public struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+        public uint StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+
+        public static DISPLAY_DEVICE Create() => new()
+        {
+            cb = Marshal.SizeOf<DISPLAY_DEVICE>(),
+            DeviceName = string.Empty,
+            DeviceString = string.Empty,
+            DeviceID = string.Empty,
+            DeviceKey = string.Empty,
+        };
+    }
+
     public static class Shell32
     {
         [DllImport("shell32.dll")]
@@ -310,8 +357,13 @@ namespace TaskbarQuota.Interop
         [DllImport("kernel32.dll")]
         public static extern IntPtr GetModuleHandle(string? module);
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        public static extern int RegisterApplicationRestart(
+            [MarshalAs(UnmanagedType.LPWStr)] string? pwzCommandline,
+            ApplicationRestart dwFlags = ApplicationRestart.None);
+
         [DllImport("kernel32.dll")]
-        public static extern IntPtr RegisterApplicationRestart(string? pwzCommandline, ApplicationRestart dwFlags = ApplicationRestart.None);
+        public static extern int UnregisterApplicationRestart();
     }
 
     [Flags]
@@ -420,5 +472,9 @@ namespace TaskbarQuota.Interop
     public enum ApplicationRestart
     {
         None = 0,
+        NoCrash = 1,
+        NoHang = 2,
+        NoPatch = 4,
+        NoReboot = 8,
     }
 }

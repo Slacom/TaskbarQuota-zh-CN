@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Text.Json;
 using System.Threading;
@@ -23,7 +24,7 @@ namespace TaskbarQuota.Usage.Providers
     /// </summary>
     public sealed class ClaudeProvider : IUsageProvider
     {
-        private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
+        private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1";
         private const string RefreshUrl = "https://platform.claude.com/v1/oauth/token";
         private const string ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
         private const string RefreshScope = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
@@ -35,6 +36,26 @@ namespace TaskbarQuota.Usage.Providers
         private static readonly object RateLimitLock = new();
         private static readonly DateTimeOffset ProcessStartedAt = DateTimeOffset.UtcNow;
         private static DateTimeOffset? _oauthRateLimitedUntil;
+        // Hash of the access token the persisted limit belongs to; null for limits saved before tokens were tracked.
+        private static string? _oauthRateLimitedTokenHash;
+        private static bool _oauthRateLimitLoaded;
+        private static int _oauthRateLimitStreak;
+        private static DateTimeOffset _webFallbackBlockedUntil;
+        private static (string AccessToken, DateTimeOffset Since)? _deferredCliRefresh;
+        // One OAuth usage request at a time: the endpoint answers a burst with a 429 and Retry-After of an hour.
+        private static readonly SemaphoreSlim OAuthRequestGate = new(1, 1);
+        private static (DateTimeOffset At, string AccessToken, ProviderFetchResult Result)? _lastOAuthResult;
+        // Minimum gap between usage requests for one token, forced refreshes included. The endpoint's
+        // budget is shared with Claude Code's own /usage; polling every 60s ran it dry after ~5 requests
+        // and froze the widget in 5-minute 429 cooldowns. CodexBar's fastest cadence is also 2 minutes.
+        internal static readonly TimeSpan OAuthResultReuseWindow = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan RateLimitBaseCooldown = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan RateLimitMaxCooldown = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan WebFallbackRetryDelay = TimeSpan.FromMinutes(15);
+        // How long to leave an expired CLI token for a running Claude Code to refresh before refreshing it here.
+        private static readonly TimeSpan CliRefreshDeferral = TimeSpan.FromMinutes(30);
+
+        private static string RateLimitStatePath => Path.Combine(AppStorage.AppDataDirectory, "claude-oauth-rate-limit.txt");
 
         public ProviderId Id => ProviderId.Claude;
         public string DisplayName => "Claude Code";
@@ -77,41 +98,148 @@ namespace TaskbarQuota.Usage.Providers
                 throw new ProviderException(ProviderErrorKind.AuthRequired, "需要登录 Claude。");
             }
 
-            if (IsOAuthRateLimited())
+            await OAuthRequestGate.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                if (await TryFetchWebUsageAsync(ct).ConfigureAwait(false) is { } webResult)
-                    return webResult;
+                if (await TryReuseOrRateLimitedAsync(creds.AccessToken, ct).ConfigureAwait(false) is { } early)
+                    return early;
 
-                throw new ProviderException(ProviderErrorKind.RateLimited, "Claude API 请求频率受限，几分钟后将重试。");
+                // An expired token can only answer 401, so skip the request and go straight to the refresh decision.
+                if (IsExpired(creds, DateTimeOffset.Now))
+                    return await FetchAfterCliTokenExpiredAsync(creds, ct).ConfigureAwait(false);
+
+                using var response = await SendUsageRequestAsync(creds.AccessToken, ct).ConfigureAwait(false);
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                    return await FetchAfterCliTokenExpiredAsync(creds, ct).ConfigureAwait(false);
+
+                return await HandleUsageResponseAsync(response, creds, ct).ConfigureAwait(false);
             }
-
-            using var response = await SendUsageRequestAsync(creds.AccessToken, ct).ConfigureAwait(false);
-
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            finally
             {
-                var refreshed = await TryRefreshCredentialsAsync(creds, ct).ConfigureAwait(false);
-                if (refreshed != null)
-                {
-                    using var retry = await SendUsageRequestAsync(refreshed.AccessToken, ct).ConfigureAwait(false);
-                    return await HandleUsageResponseAsync(retry, refreshed, ct).ConfigureAwait(false);
-                }
-
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth Token 已过期，请运行 `claude` 重新认证。");
+                OAuthRequestGate.Release();
             }
-
-            return await HandleUsageResponseAsync(response, creds, ct).ConfigureAwait(false);
         }
 
         private static async Task<ProviderFetchResult> FetchWithOAuthTokenAsync(Services.ClaudeTokens oauth, CancellationToken ct)
         {
             var creds = new Credentials(oauth.AccessToken, oauth.SubscriptionType, oauth.RateLimitTier);
-            using var resp = await SendUsageRequestAsync(oauth.AccessToken, ct).ConfigureAwait(false);
-            if (resp.StatusCode == HttpStatusCode.Unauthorized)
+            await OAuthRequestGate.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                Services.ClaudeOAuth.Logout(); // token dead and refresh already failed upstream
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "需要登录 Claude。");
+                if (await TryReuseOrRateLimitedAsync(oauth.AccessToken, ct).ConfigureAwait(false) is { } early)
+                    return early;
+
+                using var resp = await SendUsageRequestAsync(oauth.AccessToken, ct).ConfigureAwait(false);
+                if (resp.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    Services.ClaudeOAuth.Logout(); // token dead and refresh already failed upstream
+                    throw new ProviderException(ProviderErrorKind.AuthRequired, "需要登录 Claude。");
+                }
+                return await HandleUsageResponseAsync(resp, creds, ct).ConfigureAwait(false);
             }
-            return await HandleUsageResponseAsync(resp, creds, ct).ConfigureAwait(false);
+            finally
+            {
+                OAuthRequestGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// The CLI token expired or answered 401. Claude Code owns that grant: refreshing it here rotates
+        /// the refresh token under a running Claude Code, which can sign it out. So while Claude Code runs,
+        /// wait for it to refresh (the credentials file is re-read every fetch) and keep the last values;
+        /// refresh here only when Claude Code isn't running or hasn't refreshed for a long while.
+        /// </summary>
+        private static async Task<ProviderFetchResult> FetchAfterCliTokenExpiredAsync(Credentials creds, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(creds.RefreshToken))
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth Token 已过期，请运行 `claude` 重新认证。");
+
+            if (ShouldDeferCliRefresh(creds.AccessToken, IsClaudeCodeRunning(), DateTimeOffset.Now))
+                throw new ProviderException(ProviderErrorKind.Other, "正在等待 Claude Code 刷新登录状态。");
+
+            var refreshed = await TryRefreshCredentialsAsync(creds, ct).ConfigureAwait(false);
+            if (refreshed == null)
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude OAuth Token 已过期，请运行 `claude` 重新认证。");
+
+            lock (RateLimitLock)
+                _deferredCliRefresh = null;
+            using var retry = await SendUsageRequestAsync(refreshed.AccessToken, ct).ConfigureAwait(false);
+            return await HandleUsageResponseAsync(retry, refreshed, ct).ConfigureAwait(false);
+        }
+
+        internal static bool ShouldDeferCliRefresh(string accessToken, bool claudeCodeRunning, DateTimeOffset now)
+        {
+            lock (RateLimitLock)
+            {
+                if (!claudeCodeRunning)
+                    return false;
+
+                if (_deferredCliRefresh is not { } deferred || !string.Equals(deferred.AccessToken, accessToken, StringComparison.Ordinal))
+                {
+                    _deferredCliRefresh = (accessToken, now);
+                    Diagnostics.Log.Information("[claude] CLI token expired; waiting for Claude Code to refresh it.");
+                    return true;
+                }
+
+                return now - deferred.Since < CliRefreshDeferral;
+            }
+        }
+
+        private static bool IsExpired(Credentials creds, DateTimeOffset now)
+            => creds.CredentialsPath != null
+               && creds.ExpiresAtMs is { } expiresAtMs
+               && now.ToUnixTimeMilliseconds() >= expiresAtMs;
+
+        private static bool IsClaudeCodeRunning()
+        {
+            System.Diagnostics.Process[] processes = Array.Empty<System.Diagnostics.Process>();
+            try
+            {
+                processes = System.Diagnostics.Process.GetProcessesByName("claude");
+                return processes.Length > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                foreach (var process in processes)
+                    process.Dispose();
+            }
+        }
+
+        private static async Task<ProviderFetchResult?> TryReuseOrRateLimitedAsync(string accessToken, CancellationToken ct)
+        {
+            if (RecentOAuthResult(accessToken, DateTimeOffset.Now) is { } recent)
+                return recent;
+
+            if (OAuthRateLimitedUntil(accessToken) is not { } until)
+                return null;
+
+            if (await TryFetchWebUsageAsync(ct, rateLimitFallback: true).ConfigureAwait(false) is { } webResult)
+                return webResult;
+
+            throw new ProviderException(ProviderErrorKind.RateLimited, $"Claude API 请求频率受限，将在 {until.ToLocalTime():HH:mm} 重试。");
+        }
+
+        internal static ProviderFetchResult? RecentOAuthResult(string accessToken, DateTimeOffset now)
+        {
+            lock (RateLimitLock)
+            {
+                return _lastOAuthResult is { } last
+                    && string.Equals(last.AccessToken, accessToken, StringComparison.Ordinal)
+                    && now - last.At < OAuthResultReuseWindow
+                    ? last.Result
+                    : null;
+            }
+        }
+
+        internal static void RememberOAuthResult(string accessToken, ProviderFetchResult result, DateTimeOffset at)
+        {
+            lock (RateLimitLock)
+                _lastOAuthResult = (at, accessToken, result);
         }
 
         private static async Task<HttpResponseMessage> SendUsageRequestAsync(string accessToken, CancellationToken ct)
@@ -120,20 +248,26 @@ namespace TaskbarQuota.Usage.Providers
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             request.Headers.Accept.ParseAdd("application/json");
             request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
-            request.Headers.TryAddWithoutValidation("User-Agent", "claude-code/2.1.0");
-            return await Http.SendAsync(request, ct).ConfigureAwait(false);
+            request.Headers.TryAddWithoutValidation("User-Agent", "claude-cli/2.1.280 (external, cli)");
+            var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
+            Diagnostics.Log.Debug($"[claude] usage API HTTP {(int)response.StatusCode}");
+            return response;
         }
 
         private static async Task<ProviderFetchResult> HandleUsageResponseAsync(HttpResponseMessage response, Credentials creds, CancellationToken ct)
         {
             if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
             {
-                RecordOAuthRateLimit(response);
-                if (await TryFetchWebUsageAsync(ct).ConfigureAwait(false) is { } webResult)
+                var retryAfter = ParseRetryAfter(response);
+                var until = RecordOAuthRateLimit(creds.AccessToken, retryAfter, DateTimeOffset.Now);
+                Diagnostics.Log.Warning(
+                    $"[claude] usage API HTTP {(int)response.StatusCode}; Retry-After={response.Headers.RetryAfter?.ToString() ?? "none"}; " +
+                    $"cooling down until {until.ToLocalTime():HH:mm:ss}.");
+                if (await TryFetchWebUsageAsync(ct, rateLimitFallback: true).ConfigureAwait(false) is { } webResult)
                     return webResult;
 
                 throw new ProviderException(ProviderErrorKind.RateLimited,
-                    $"Claude API 请求频率受限（状态码 {(int)response.StatusCode}），几分钟后将重试。");
+                    $"Claude API 请求频率受限（状态码 {(int)response.StatusCode}），将在 {until.ToLocalTime():HH:mm} 重试。");
             }
             if (!response.IsSuccessStatusCode)
                 throw new ProviderException(ProviderErrorKind.Other, $"Claude API 返回状态码 {(int)response.StatusCode}");
@@ -142,7 +276,9 @@ namespace TaskbarQuota.Usage.Providers
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
             ClearOAuthRateLimit();
 
-            return BuildResult(doc.RootElement, creds);
+            var result = BuildResult(doc.RootElement, creds);
+            RememberOAuthResult(creds.AccessToken, result, DateTimeOffset.Now);
+            return result;
         }
 
         private static ProviderFetchResult BuildResult(JsonElement json, Credentials creds)
@@ -180,6 +316,7 @@ namespace TaskbarQuota.Usage.Providers
             };
             usage.Secondary = secondary;
             usage.ModelSpecific = modelSpecific;
+            usage.ResetCredits = ParseResetGrants(json);
 
             if (fableWeekly is { } fable)
                 usage.ExtraRateWindows.Add(new NamedRateWindow("claude-fable", "Fable", fable));
@@ -197,6 +334,41 @@ namespace TaskbarQuota.Usage.Providers
             usage.LoginMethod = plan;
             return new ProviderFetchResult(usage, "oauth");
         }
+
+        private static ResetCreditsSnapshot? ParseResetGrants(JsonElement root)
+        {
+            if (!root.TryGetProperty("cedar_ember", out var block) || block.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var grants = new List<ResetCreditGrant>();
+            if (block.TryGetProperty("eligible", out var eligible) && eligible.ValueKind == JsonValueKind.True &&
+                block.TryGetProperty("grants", out var grantArray) && grantArray.ValueKind == JsonValueKind.Array)
+            {
+                var now = DateTimeOffset.UtcNow;
+                foreach (var grant in grantArray.EnumerateArray())
+                {
+                    if (grant.ValueKind != JsonValueKind.Object || Num(grant, "resets_left") is not double resetsLeft
+                        || resetsLeft < 1 || resetsLeft > 100)
+                        continue;
+                    int count = (int)resetsLeft;
+
+                    DateTimeOffset? expiresAt = ParseDateTimeOffset(grant, "ends_at");
+                    if (expiresAt is { } expiry && expiry <= now) continue;
+                    DateTimeOffset? grantedAt = ParseDateTimeOffset(grant, "starts_at");
+                    // A grant can contain multiple resets. Keep one item per remaining reset for detail views.
+                    for (int i = 0; i < count; i++)
+                        grants.Add(new ResetCreditGrant("available", grantedAt, expiresAt));
+                }
+            }
+
+            return new ResetCreditsSnapshot(grants.Count, grants);
+        }
+
+        private static DateTimeOffset? ParseDateTimeOffset(JsonElement parent, string name)
+            => parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(value.GetString(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed)
+                ? parsed : null;
 
         private static CostSnapshot RelabelCostPeriod(CostSnapshot cost, string period)
         {
@@ -219,7 +391,10 @@ namespace TaskbarQuota.Usage.Providers
         }
 
         private static RateWindow WithLabel(RateWindow window, string label)
-            => new(window.UsedPercent, window.WindowMinutes, window.ResetAt, window.ResetDescription, label);
+            => new(window.UsedPercent, window.WindowMinutes, window.ResetAt, window.ResetDescription, label)
+            {
+                IsIncluded = window.IsIncluded,
+            };
 
         internal static ProviderFetchResult BuildResultForTesting(JsonElement json, Credentials creds)
             => BuildResult(json, creds);
@@ -396,25 +571,74 @@ namespace TaskbarQuota.Usage.Providers
             return null;
         }
 
-        private static bool IsOAuthRateLimited()
+        /// <summary>
+        /// When the OAuth usage endpoint is cooling down for this token, returns the time it may be asked again.
+        /// The limit is tracked per token (as CodexBar does): a token Claude Code just rotated gets a fresh budget.
+        /// </summary>
+        internal static DateTimeOffset? OAuthRateLimitedUntil(string accessToken)
         {
             lock (RateLimitLock)
             {
+                LoadPersistedRateLimit();
                 if (_oauthRateLimitedUntil is not { } until)
-                    return false;
-                if (DateTimeOffset.Now < until)
-                    return true;
-                _oauthRateLimitedUntil = null;
-                return false;
+                    return null;
+                if (DateTimeOffset.Now >= until)
+                {
+                    _oauthRateLimitedUntil = null;
+                    _oauthRateLimitedTokenHash = null;
+                    PersistRateLimit();
+                    return null;
+                }
+
+                return _oauthRateLimitedTokenHash is null || _oauthRateLimitedTokenHash == TokenHash(accessToken)
+                    ? until
+                    : null;
             }
         }
 
-        private static void RecordOAuthRateLimit(HttpResponseMessage response)
+        internal static bool IsOAuthRateLimited(string accessToken) => OAuthRateLimitedUntil(accessToken) is not null;
+
+        /// <summary>
+        /// Starts (or extends) the cooldown after a 429. Retry-After wins when present; otherwise the wait
+        /// doubles with each consecutive 429 (5, 10, 20, 30 min) so a still-limited endpoint isn't re-hit
+        /// every 5 minutes. An existing later deadline is never shortened.
+        /// </summary>
+        internal static DateTimeOffset RecordOAuthRateLimit(string accessToken, DateTimeOffset? retryAfter, DateTimeOffset now)
         {
-            var until = ParseRetryAfter(response) ?? DateTimeOffset.Now.AddMinutes(5);
             lock (RateLimitLock)
             {
+                LoadPersistedRateLimit();
+                _oauthRateLimitStreak++;
+                var candidate = retryAfter is { } ra && ra > now ? ra : now + RateLimitCooldown(_oauthRateLimitStreak);
+                var hash = TokenHash(accessToken);
+                if (_oauthRateLimitedUntil is { } existing && existing > candidate
+                    && (_oauthRateLimitedTokenHash is null || _oauthRateLimitedTokenHash == hash))
+                {
+                    candidate = existing;
+                }
+
+                _oauthRateLimitedUntil = candidate;
+                _oauthRateLimitedTokenHash = hash;
+                PersistRateLimit();
+                return candidate;
+            }
+        }
+
+        internal static TimeSpan RateLimitCooldown(int consecutiveRateLimits)
+        {
+            var factor = Math.Pow(2, Math.Clamp(consecutiveRateLimits - 1, 0, 10));
+            var cooldown = TimeSpan.FromTicks((long)(RateLimitBaseCooldown.Ticks * factor));
+            return cooldown < RateLimitMaxCooldown ? cooldown : RateLimitMaxCooldown;
+        }
+
+        internal static void RecordOAuthRateLimitUntil(DateTimeOffset until, string? accessToken = null)
+        {
+            lock (RateLimitLock)
+            {
+                _oauthRateLimitLoaded = true;
                 _oauthRateLimitedUntil = until;
+                _oauthRateLimitedTokenHash = accessToken is null ? null : TokenHash(accessToken);
+                PersistRateLimit();
             }
         }
 
@@ -422,8 +646,72 @@ namespace TaskbarQuota.Usage.Providers
         {
             lock (RateLimitLock)
             {
+                _oauthRateLimitLoaded = true;
+                _oauthRateLimitStreak = 0;
+                _webFallbackBlockedUntil = default;
+                if (_oauthRateLimitedUntil is null)
+                    return;
                 _oauthRateLimitedUntil = null;
+                _oauthRateLimitedTokenHash = null;
+                PersistRateLimit();
             }
+        }
+
+        internal static void ForgetInMemoryRateLimitForTesting()
+        {
+            lock (RateLimitLock)
+            {
+                _oauthRateLimitedUntil = null;
+                _oauthRateLimitedTokenHash = null;
+                _oauthRateLimitLoaded = false;
+                _oauthRateLimitStreak = 0;
+                _webFallbackBlockedUntil = default;
+                _deferredCliRefresh = null;
+                _lastOAuthResult = null;
+            }
+        }
+
+        private static string TokenHash(string accessToken)
+            => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(accessToken)))[..16];
+
+        // File format: "<until, round-trip>|<token hash>"; older builds wrote just the timestamp.
+        private static void LoadPersistedRateLimit()
+        {
+            if (_oauthRateLimitLoaded)
+                return;
+            _oauthRateLimitLoaded = true;
+            try
+            {
+                if (!File.Exists(RateLimitStatePath))
+                    return;
+
+                var parts = File.ReadAllText(RateLimitStatePath).Trim().Split('|', 2);
+                if (DateTimeOffset.TryParse(parts[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var until))
+                {
+                    _oauthRateLimitedUntil = until;
+                    _oauthRateLimitedTokenHash = parts.Length == 2 && parts[1].Length > 0 ? parts[1] : null;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        private static void PersistRateLimit()
+        {
+            try
+            {
+                if (_oauthRateLimitedUntil is { } until)
+                {
+                    Directory.CreateDirectory(AppStorage.AppDataDirectory);
+                    File.WriteAllText(RateLimitStatePath, until.ToString("O", CultureInfo.InvariantCulture) + "|" + _oauthRateLimitedTokenHash);
+                }
+                else if (File.Exists(RateLimitStatePath))
+                {
+                    File.Delete(RateLimitStatePath);
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         internal static DateTimeOffset? ParseRetryAfter(HttpResponseMessage response)
@@ -439,8 +727,19 @@ namespace TaskbarQuota.Usage.Providers
             return null;
         }
 
-        private static async Task<ProviderFetchResult?> TryFetchWebUsageAsync(CancellationToken ct)
+        private static async Task<ProviderFetchResult?> TryFetchWebUsageAsync(CancellationToken ct, bool rateLimitFallback = false)
         {
+            // As a rate-limit fallback, a failed cookie read (expired cookies, locked browser DB) is not
+            // retried on every cache expiry: each attempt scans every browser profile for several seconds.
+            if (rateLimitFallback)
+            {
+                lock (RateLimitLock)
+                {
+                    if (DateTimeOffset.Now < _webFallbackBlockedUntil)
+                        return null;
+                }
+            }
+
             try
             {
                 var cookie = ResolveClaudeWebCookie();
@@ -474,7 +773,22 @@ namespace TaskbarQuota.Usage.Providers
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Diagnostics.Log.Warning(ex, "Claude OAuth usage was rate limited and the web usage fallback was unavailable.");
+                if (rateLimitFallback)
+                {
+                    DateTimeOffset retryAt;
+                    lock (RateLimitLock)
+                    {
+                        retryAt = DateTimeOffset.Now + WebFallbackRetryDelay;
+                        if (_oauthRateLimitedUntil is { } until && until > retryAt)
+                            retryAt = until;
+                        _webFallbackBlockedUntil = retryAt;
+                    }
+                    Diagnostics.Log.Warning($"Claude OAuth usage was rate limited and the web usage fallback was unavailable ({ex.Message}); not retrying it before {retryAt.ToLocalTime():HH:mm}.");
+                }
+                else
+                {
+                    Diagnostics.Log.Warning(ex, "Claude web usage was unavailable.");
+                }
                 return null;
             }
         }
@@ -565,7 +879,7 @@ namespace TaskbarQuota.Usage.Providers
 
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude Web Cookie 已过期。");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Claude Web Cookie 已过期，请重新登录。");
             if (!response.IsSuccessStatusCode)
                 throw new ProviderException(ProviderErrorKind.Other, $"{label} 返回状态码 {(int)response.StatusCode}");
 
@@ -693,8 +1007,10 @@ namespace TaskbarQuota.Usage.Providers
             // Desktop store: when the user signs in through the Claude desktop app instead, the CLI
             // file holds only metadata with an empty token — the live token lives in the desktop
             // app's encrypted config. Auto-detect it so local Claude works without an explicit login.
+            // No refresh token passed on: the desktop app owns and rotates this grant, and refreshing
+            // it here would invalidate the app's copy. A 401 just waits for the app's next refresh.
             if (ClaudeDesktopTokenReader.TryRead() is { } desktop)
-                return new Credentials(desktop.AccessToken, desktop.SubscriptionType, desktop.RateLimitTier, desktop.RefreshToken, desktop.ExpiresAtMs);
+                return new Credentials(desktop.AccessToken, desktop.SubscriptionType, desktop.RateLimitTier, null, desktop.ExpiresAtMs);
 
             // Nothing usable on disk — surface the right state so the caller can fall back to web /
             // prompt the one-click login.
@@ -706,7 +1022,7 @@ namespace TaskbarQuota.Usage.Providers
                 throw new ProviderException(ProviderErrorKind.NotRunning, ProviderInstallDetector.WaitingMessage(ProviderId.Claude));
             }
 
-            throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Claude OAuth 访问 Token，请运行 `claude` 完成认证。");
+            throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Claude OAuth 访问 Token，请运行 `claude` 进行认证。");
         }
 
         /// <summary>Reads the CLI credentials file; returns null when it is absent or holds an empty token.</summary>
@@ -731,7 +1047,7 @@ namespace TaskbarQuota.Usage.Providers
 
             string? access = oauth.TryGetProperty("accessToken", out var at) ? at.GetString() : null;
             if (string.IsNullOrEmpty(access))
-                throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Claude OAuth 访问 Token，请运行 `claude` 完成认证。");
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "缺少 Claude OAuth 访问 Token，请运行 `claude` 进行认证。");
 
             string? tier = oauth.TryGetProperty("rateLimitTier", out var rt) ? rt.GetString() : null;
             string? subType = oauth.TryGetProperty("subscriptionType", out var st) ? st.GetString() : null;

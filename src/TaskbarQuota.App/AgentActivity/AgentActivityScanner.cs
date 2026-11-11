@@ -35,18 +35,22 @@ internal sealed class AgentActivityScanner
     {
         // This deliberately does not use ActiveAppDetector: foreground-provider detection drives the
         // quota tiles, while activity follows every running agent in the desktop or a terminal.
-        var desktopApps = ScanDesktopAgentApps();
-        var terminalAgents = ScanTerminalAgentCommands();
-        var liveProviders = MergeLiveProviders(desktopApps, terminalAgents);
+        var (desktopApps, recencyGatedDesktop) = ScanDesktopAgentApps();
+        var (terminalAgents, recencyGatedTerminal) = ScanTerminalAgentCommands();
+        var (liveProviders, recencyGated) = ResolveLiveProviders(
+            desktopApps, recencyGatedDesktop, terminalAgents, recencyGatedTerminal,
+            ProviderDiscoveryService.IsExplicitlyDisabled);
         var files = new List<(ProviderId Provider, string Path, DateTimeOffset Modified)>();
         bool discoverCandidates = DateTimeOffset.UtcNow - _lastCandidateDiscovery >= CandidateDiscoveryInterval;
         // Process discovery is intentionally the gate for transcript/database work. Most agent
         // stores are SQLite or recursive file trees, so reopening them every tick when the app is
         // closed wastes the bulk of the activity refresh time.
         if (discoverCandidates && IsDetected(ProviderId.Codex))
-            AddRecent(files, Path.Combine(_home, ".codex", "sessions"), ProviderId.Codex, cancellationToken);
+            AddRecent(files, Path.Combine(_home, ".codex", "sessions"), ProviderId.Codex,
+                recencyGated.Contains(ProviderId.Codex), cancellationToken);
         if (discoverCandidates && IsDetected(ProviderId.Claude))
-            AddRecent(files, Path.Combine(_home, ".claude", "projects"), ProviderId.Claude, cancellationToken);
+            AddRecent(files, Path.Combine(_home, ".claude", "projects"), ProviderId.Claude,
+                recencyGated.Contains(ProviderId.Claude), cancellationToken);
         if (discoverCandidates && IsDetected(ProviderId.Grok))
             AddGrokSessions(files, cancellationToken);
         if (discoverCandidates && IsDetected(ProviderId.Antigravity))
@@ -84,17 +88,21 @@ internal sealed class AgentActivityScanner
         files.RemoveAll(file => file.Provider == ProviderId.Copilot);
         files.AddRange(copilotFiles);
 
-        AddRememberedCandidates(files, liveProviders);
+        AddRememberedCandidates(files, liveProviders, recencyGated);
+        // A provider disabled in Settings must not surface in activity, including sessions that were
+        // remembered before the user turned it off.
+        files.RemoveAll(file => ProviderDiscoveryService.IsExplicitlyDisabled(file.Provider));
         var candidates = SelectCandidates(files);
         RememberCandidates(candidates);
 
         var parsed = new List<AgentActivityItem>();
         var liveClaims = new Dictionary<ProviderId, int>();
+        var now = DateTimeOffset.Now;
         foreach (var file in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
             int claim = liveClaims.TryGetValue(file.Provider, out var currentClaim) ? currentClaim : 0;
-            bool claimLive = liveProviders.TryGetValue(file.Provider, out var liveCount) && claim < liveCount;
+            bool claimLive = ShouldClaimLive(file.Provider, file.Modified, claim, liveProviders, recencyGated, now);
             var candidateItems = new List<AgentActivityItem>();
             if (file.Provider == ProviderId.Grok)
             {
@@ -157,9 +165,24 @@ internal sealed class AgentActivityScanner
         return result;
     }
 
+    /// <summary>
+    /// Decides whether a transcript may borrow one of its provider's live-process claims. A
+    /// recency-gated host (one that idles in the tray, like ChatGPT) only vouches for sessions
+    /// written recently; otherwise an old completed thread would stay "Idle" forever.
+    /// </summary>
+    internal static bool ShouldClaimLive(ProviderId provider, DateTimeOffset modified, int claim,
+        IReadOnlyDictionary<ProviderId, int> liveProviders, IReadOnlySet<ProviderId> recencyGated,
+        DateTimeOffset now)
+    {
+        if (!liveProviders.TryGetValue(provider, out var liveCount) || claim >= liveCount)
+            return false;
+        return !recencyGated.Contains(provider) || now - modified <= RecentWindow;
+    }
+
     private void AddRememberedCandidates(
         List<(ProviderId Provider, string Path, DateTimeOffset Modified)> files,
-        IReadOnlyDictionary<ProviderId, int> liveProviders)
+        IReadOnlyDictionary<ProviderId, int> liveProviders,
+        IReadOnlySet<ProviderId> recencyGated)
     {
         lock (_candidateGate)
         {
@@ -174,7 +197,8 @@ internal sealed class AgentActivityScanner
                 var modifiedUtc = File.GetLastWriteTimeUtc(path);
                 var modified = new DateTimeOffset(modifiedUtc, TimeSpan.Zero).ToLocalTime();
                 if (DateTimeOffset.Now - modified > RecentWindow
-                    && !liveProviders.ContainsKey(candidate.Provider))
+                    && (!liveProviders.ContainsKey(candidate.Provider)
+                        || recencyGated.Contains(candidate.Provider)))
                 {
                     _knownCandidates.Remove(path);
                     continue;
@@ -207,6 +231,8 @@ internal sealed class AgentActivityScanner
     {
         lock (_candidateGate)
             _knownCandidates.Clear();
+        lock (_tailParseCache)
+            _tailParseCache.Clear();
         _lastCandidateDiscovery = DateTimeOffset.MinValue;
         _threadNames = new CodexThreadNameResolver();
     }
@@ -220,15 +246,22 @@ internal sealed class AgentActivityScanner
             .OrderByDescending(file => file.Modified)
             .ToArray();
 
-    private sealed class ProcessBackedCandidateAccumulator
+    internal sealed class ProcessBackedCandidateAccumulator
     {
         private readonly List<(ProviderId Provider, string Path, DateTimeOffset Modified)> _output;
+        private readonly bool _recentOnly;
         private (ProviderId Provider, string Path, DateTimeOffset Modified)? _latest;
         private bool _addedRecent;
 
+        /// <param name="recentOnly">Skip the stale-latest fallback when the live process cannot
+        /// vouch for an old session (a recency-gated tray host).</param>
         public ProcessBackedCandidateAccumulator(
-            List<(ProviderId Provider, string Path, DateTimeOffset Modified)> output)
-            => _output = output;
+            List<(ProviderId Provider, string Path, DateTimeOffset Modified)> output,
+            bool recentOnly = false)
+        {
+            _output = output;
+            _recentOnly = recentOnly;
+        }
 
         public void Add(ProviderId provider, string path, DateTime modifiedUtc)
         {
@@ -245,18 +278,18 @@ internal sealed class AgentActivityScanner
 
         public void Complete()
         {
-            if (!_addedRecent && _latest is { } latest)
+            if (!_recentOnly && !_addedRecent && _latest is { } latest)
                 _output.Add(latest);
         }
     }
 
     private void AddRecent(List<(ProviderId, string, DateTimeOffset)> output, string root,
-        ProviderId provider, CancellationToken cancellationToken)
+        ProviderId provider, bool recentOnly, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(root))
             return;
 
-        var candidates = new ProcessBackedCandidateAccumulator(output);
+        var candidates = new ProcessBackedCandidateAccumulator(output, recentOnly);
         try
         {
             foreach (var path in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories))
@@ -1620,6 +1653,12 @@ internal sealed class AgentActivityScanner
     private static string FirstJsonString(string json, params string[] names) => ReadZcodeText(json, names);
     private static string FirstStringDeepFromJson(string json, params string[] names) => string.IsNullOrWhiteSpace(json) ? "" : ReadZcodeText(json, names);
 
+    private const int TailParseCacheLimit = 128;
+    private readonly Dictionary<string, TailParse> _tailParseCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record TailParse(
+        long Length, DateTimeOffset Modified, TailInfo Info, SessionMetadata Session, ClaudeSessionContext? Claude);
+
     private bool TryRead(ProviderId provider, string path, DateTimeOffset modified,
         bool claimLive, out AgentActivityItem item)
     {
@@ -1630,14 +1669,37 @@ internal sealed class AgentActivityScanner
             if (stream.Length == 0)
                 return false;
 
-            stream.Seek(Math.Max(0, stream.Length - 131_072), SeekOrigin.Begin);
-            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            var text = reader.ReadToEnd();
-            var info = ParseTail(provider, text);
-            var session = provider == ProviderId.Codex ? ReadSessionMetadata(path) : default;
-            ClaudeSessionContext? claude = provider == ProviderId.Claude
-                ? ReadClaudeSessionContext(path, info.ThreadId)
-                : null;
+            // Everything parsed here depends only on the file contents, so an unchanged transcript
+            // (same handle-reported length and last-write time) reuses its parse. Time-relative status
+            // below is still recomputed on every scan.
+            var length = stream.Length;
+            TailParse parse;
+            lock (_tailParseCache)
+            {
+                if (!_tailParseCache.TryGetValue(path, out parse!) || parse.Length != length || parse.Modified != modified)
+                    parse = null!;
+            }
+            if (parse is null)
+            {
+                stream.Seek(Math.Max(0, length - 131_072), SeekOrigin.Begin);
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var text = reader.ReadToEnd();
+                var parsedInfo = ParseTail(provider, text);
+                var parsedSession = provider == ProviderId.Codex ? ReadSessionMetadata(path) : default;
+                ClaudeSessionContext? parsedClaude = provider == ProviderId.Claude
+                    ? ReadClaudeSessionContext(path, parsedInfo.ThreadId)
+                    : null;
+                parse = new TailParse(length, modified, parsedInfo, parsedSession, parsedClaude);
+                lock (_tailParseCache)
+                {
+                    if (_tailParseCache.Count >= TailParseCacheLimit)
+                        _tailParseCache.Clear();
+                    _tailParseCache[path] = parse;
+                }
+            }
+            var info = parse.Info;
+            var session = parse.Session;
+            var claude = parse.Claude;
             bool freshAgentEvent = info.LastActivity is { } activity && DateTimeOffset.Now - activity < BusyWindow;
             // One desktop provider process can host several concurrent threads. The process claim marks
             // the session live; transcript timestamps then distinguish working from quiet/idle.
@@ -1676,6 +1738,7 @@ internal sealed class AgentActivityScanner
                 Detail: info.Prompt,
                 Model: info.Model,
                 ThreadId: threadId,
+                ActionPending: status == AgentActivityStatus.Idle && info.State == TranscriptState.Action,
                 ParentThreadId: provider == ProviderId.Claude
                     ? claude?.ParentThreadId ?? info.ParentThreadId
                     : session.ParentThreadId ?? info.ParentThreadId,
@@ -3226,33 +3289,48 @@ internal sealed class AgentActivityScanner
         => value.Length <= length ? value : value[..length].TrimEnd() + "…";
 
     /// <summary>Finds installed desktop agent apps, regardless of which window is foreground.</summary>
-    private static IReadOnlyDictionary<ProviderId, int> ScanDesktopAgentApps()
+    /// <summary>
+    /// Finds installed desktop agent apps, regardless of which window is foreground. Providers seen
+    /// only through a recency-gated host are returned separately so they cannot pin old sessions.
+    /// </summary>
+    private static (IReadOnlyDictionary<ProviderId, int> Live, IReadOnlySet<ProviderId> RecencyGated)
+        ScanDesktopAgentApps()
     {
         var live = new Dictionary<ProviderId, int>();
-        foreach (var process in Process.GetProcesses())
+        var gatedOnly = new HashSet<ProviderId>();
+        var ungated = new HashSet<ProviderId>();
+        foreach (var entry in ProcessSnapshot.Capture())
         {
-            try
+            var processName = entry.ExeName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                ? entry.ExeName[..^4]
+                : entry.ExeName;
+            if (TryGetDesktopProvider(processName, out var provider, out var recencyGated))
             {
-                if (TryGetDesktopProvider(process.ProcessName, out var provider))
-                    Add(provider);
+                // Electron-style apps may have many helper processes. They represent one
+                // desktop agent, not several simultaneous tasks.
+                live[provider] = 1;
+                (recencyGated ? gatedOnly : ungated).Add(provider);
             }
-            catch { }
-            finally { process.Dispose(); }
         }
-        return live;
-
-        // Electron-style apps may have many helper processes. They represent one desktop agent,
-        // not several simultaneous tasks.
-        void Add(ProviderId provider) => live[provider] = 1;
+        gatedOnly.ExceptWith(ungated);
+        return (live, gatedOnly);
     }
 
     private static bool TryGetDesktopProvider(string processName, out ProviderId provider)
+        => TryGetDesktopProvider(processName, out provider, out _);
+
+    /// <param name="recencyGated">The process stays resident regardless of agent work, so it only
+    /// vouches for recent sessions. The Codex desktop app runs as ChatGPT.exe and keeps a
+    /// `codex app-server` child alive; a bare process name cannot tell that backend from an
+    /// interactive CLI, so the terminal scan (which sees command lines) lifts the gate instead.</param>
+    private static bool TryGetDesktopProvider(string processName, out ProviderId provider, out bool recencyGated)
     {
         provider = default;
+        recencyGated = false;
         switch (processName.ToLowerInvariant())
         {
             case "codex":
-            case "chatgpt": provider = ProviderId.Codex; return true;
+            case "chatgpt": provider = ProviderId.Codex; recencyGated = true; return true;
             case "claude": provider = ProviderId.Claude; return true;
             case "grok": provider = ProviderId.Grok; return true;
             case "cursor": provider = ProviderId.Cursor; return true;
@@ -3277,46 +3355,64 @@ internal sealed class AgentActivityScanner
     internal static ProviderId? DetectDesktopProviderForTesting(string processName)
         => TryGetDesktopProvider(processName, out var provider) ? provider : null;
 
+    internal static bool IsRecencyGatedDesktopHostForTesting(string processName)
+        => TryGetDesktopProvider(processName, out _, out var recencyGated) && recencyGated;
+
+    internal static readonly HashSet<string> TerminalScanProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cmd.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "node.exe",
+        "bun.exe",
+        "deno.exe",
+        "npm.exe",
+        "npx.exe",
+        "pnpm.exe",
+        "yarn.exe",
+        "wsl.exe",
+        "bash.exe",
+        "codex.exe",
+        "claude.exe",
+        "cursor-agent.exe",
+        "opencode.exe",
+        "cline.exe",
+        "kimi.exe",
+        "agy.exe",
+        "grok.exe",
+        "zcode.exe",
+        "copilot.exe",
+        "github-copilot.exe"
+    };
+
     /// <summary>
     /// Finds agents launched from CMD, PowerShell, Windows Terminal, or a script runtime. This is
     /// intentionally a separate scan from desktop apps and never consults the foreground window.
     /// </summary>
-    private static IReadOnlyDictionary<ProviderId, int> ScanTerminalAgentCommands()
+    private static (IReadOnlyDictionary<ProviderId, int> Live, IReadOnlySet<ProviderId> RecencyGated)
+        ScanTerminalAgentCommands()
     {
         var live = new Dictionary<ProviderId, int>();
-        var matches = new List<(int ProcessId, int ParentProcessId, ProviderId Provider)>();
-        const string query = "SELECT ProcessId, ParentProcessId, Name, CommandLine FROM Win32_Process WHERE " +
-            "Name = 'cmd.exe' OR Name = 'powershell.exe' OR Name = 'pwsh.exe' OR Name = 'node.exe' OR " +
-            "Name = 'bun.exe' OR Name = 'deno.exe' OR Name = 'npm.exe' OR Name = 'npx.exe' OR " +
-            "Name = 'pnpm.exe' OR Name = 'yarn.exe' OR Name = 'wsl.exe' OR Name = 'bash.exe' OR " +
-            "Name = 'codex.exe' OR Name = 'claude.exe' OR Name = 'cursor-agent.exe' OR " +
-            "Name = 'opencode.exe' OR Name = 'cline.exe' OR Name = 'kimi.exe' OR Name = 'agy.exe' OR Name = 'grok.exe' OR Name = 'zcode.exe' OR Name = 'copilot.exe' OR Name = 'github-copilot.exe'";
-
-        try
+        var gatedOnly = new HashSet<ProviderId>();
+        var ungated = new HashSet<ProviderId>();
+        var matches = new List<(int ProcessId, int ParentProcessId, ProviderId Provider, bool RecencyGated)>();
+        var wanted = new List<ProcessEntry>();
+        foreach (var entry in ProcessSnapshot.Capture())
         {
-            using var searcher = new ManagementObjectSearcher(query);
-            using var processes = searcher.Get();
-            foreach (ManagementObject process in processes)
-            {
-                using (process)
-                {
-                    var name = Path.GetFileNameWithoutExtension(process["Name"]?.ToString() ?? "");
-                    var commandLine = process["CommandLine"]?.ToString() ?? "";
-                    if (TryGetTerminalProvider(name, commandLine, out var provider))
-                    {
-                        var processId = Convert.ToInt32(process["ProcessId"] ?? 0);
-                        if (processId <= 0)
-                            continue;
-                        matches.Add((
-                            processId,
-                            Convert.ToInt32(process["ParentProcessId"] ?? 0),
-                            provider));
-                    }
-                }
-            }
+            if (TerminalScanProcessNames.Contains(entry.ExeName))
+                wanted.Add(entry);
         }
-        catch (ManagementException) { }
-        catch (UnauthorizedAccessException) { }
+
+        // Command lines never change for a live process; WMI is only asked about pids not seen before.
+        var commandLines = ProcessSnapshot.GetCommandLines(wanted.ConvertAll(e => (e.Pid, e.ParentPid)));
+        foreach (var entry in wanted)
+        {
+            if (entry.Pid <= 0 || !commandLines.TryGetValue(entry.Pid, out var info))
+                continue;
+            var name = Path.GetFileNameWithoutExtension(info.Name);
+            if (TryGetTerminalProvider(name, info.CommandLine, out var provider, out var recencyGated))
+                matches.Add((entry.Pid, entry.ParentPid, provider, recencyGated));
+        }
 
         var byId = matches.ToDictionary(match => match.ProcessId);
         foreach (var match in matches)
@@ -3336,19 +3432,33 @@ internal sealed class AgentActivityScanner
                 parentId = parent.ParentProcessId;
             }
             if (!hasMatchingAncestor)
-                Add(match.Provider);
+            {
+                live[match.Provider] = live.TryGetValue(match.Provider, out var count) ? count + 1 : 1;
+                (match.RecencyGated ? gatedOnly : ungated).Add(match.Provider);
+            }
         }
 
-        return live;
-        void Add(ProviderId provider) => live[provider] = live.TryGetValue(provider, out var count) ? count + 1 : 1;
+        gatedOnly.ExceptWith(ungated);
+        return (live, gatedOnly);
     }
 
     private static bool TryGetTerminalProvider(string executable, string commandLine, out ProviderId provider)
+        => TryGetTerminalProvider(executable, commandLine, out provider, out _);
+
+    /// <param name="recencyGated">The process is a long-lived backend rather than an interactive
+    /// task: `codex app-server` is spawned by the Codex desktop app (ChatGPT.exe) and the IDE
+    /// extension and outlives every turn, so it only vouches for recent sessions.</param>
+    private static bool TryGetTerminalProvider(string executable, string commandLine, out ProviderId provider,
+        out bool recencyGated)
     {
         provider = default;
+        recencyGated = false;
         var exe = executable.ToLowerInvariant();
         if (TryGetDirectTerminalProvider(exe, out provider))
+        {
+            recencyGated = provider == ProviderId.Codex && IsRecencyGatedCodex(commandLine);
             return true;
+        }
 
         // Shell command lines routinely contain paths such as .codex or user-entered search terms. Do
         // not infer an agent from arbitrary substrings. Runtime wrappers are accepted only when their
@@ -3358,7 +3468,12 @@ internal sealed class AgentActivityScanner
 
         var text = commandLine.ToLowerInvariant().Replace('/', '\\');
         if (ContainsPackage(text, "@anthropic-ai\\claude-code", "claude-code\\cli", "\\claude-code.")) { provider = ProviderId.Claude; return true; }
-        if (ContainsPackage(text, "@openai\\codex", "\\codex\\bin\\codex", "\\codex-cli")) { provider = ProviderId.Codex; return true; }
+        if (ContainsPackage(text, "@openai\\codex", "\\codex\\bin\\codex", "\\codex-cli"))
+        {
+            provider = ProviderId.Codex;
+            recencyGated = IsRecencyGatedCodex(commandLine);
+            return true;
+        }
         if (ContainsPackage(text, "cursor-agent", "@cursor\\agent")) { provider = ProviderId.Cursor; return true; }
         if (ContainsPackage(text, "opencode-ai", "\\opencode\\bin", "\\opencode-ai")) { provider = ProviderId.OpenCode; return true; }
         if (ContainsPackage(text, "@cline\\", "\\cline\\bin", "cline-cli")) { provider = ProviderId.Cline; return true; }
@@ -3393,8 +3508,83 @@ internal sealed class AgentActivityScanner
     private static bool ContainsPackage(string commandLine, params string[] markers)
         => markers.Any(marker => commandLine.Contains(marker, StringComparison.Ordinal));
 
+    /// <summary>
+    /// WMI returns no command line for processes it cannot inspect (elevated or another user's), so
+    /// an unreadable Codex process could be the app-server and must stay recency-gated.
+    /// </summary>
+    private static bool IsRecencyGatedCodex(string? commandLine)
+        => string.IsNullOrWhiteSpace(commandLine) || IsCodexAppServer(commandLine);
+
+    /// <summary>
+    /// True when `app-server` is the Codex subcommand (the first positional argument after the codex
+    /// entry point), so a prompt that merely mentions it does not count.
+    /// </summary>
+    private static bool IsCodexAppServer(string commandLine)
+    {
+        var tokens = TokenizeCommandLine(commandLine);
+        int start = tokens.FindIndex(token =>
+        {
+            var name = token.ToLowerInvariant();
+            return name.EndsWith("codex") || name.EndsWith("codex.exe") || name.EndsWith("codex.js")
+                || name.EndsWith("codex.cmd") || name.EndsWith("codex.mjs");
+        });
+        if (start < 0)
+            return false;
+
+        for (int i = start + 1; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token.StartsWith('-'))
+            {
+                // Options such as `-c key=value` carry their value in the next token.
+                if (token is "-c" or "--config" or "-m" or "--model" or "-p" or "--profile" or "-C" or "--cd")
+                    i++;
+                continue;
+            }
+            return token.Equals("app-server", StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Splits on whitespace outside double quotes and drops the quotes, so a quoted path with spaces
+    /// (`-C "C:\My Dir"`) stays one token.
+    /// </summary>
+    private static List<string> TokenizeCommandLine(string commandLine)
+    {
+        var tokens = new List<string>();
+        var current = new StringBuilder();
+        bool inQuotes = false, hasToken = false;
+        foreach (var ch in commandLine)
+        {
+            if (ch == '"')
+            {
+                inQuotes = !inQuotes;
+                hasToken = true;
+            }
+            else if (char.IsWhiteSpace(ch) && !inQuotes)
+            {
+                if (hasToken)
+                    tokens.Add(current.ToString());
+                current.Clear();
+                hasToken = false;
+            }
+            else
+            {
+                current.Append(ch);
+                hasToken = true;
+            }
+        }
+        if (hasToken)
+            tokens.Add(current.ToString());
+        return tokens;
+    }
+
     internal static ProviderId? DetectTerminalProviderForTesting(string executable, string commandLine)
         => TryGetTerminalProvider(executable, commandLine, out var provider) ? provider : null;
+
+    internal static bool IsRecencyGatedTerminalCommandForTesting(string executable, string commandLine)
+        => TryGetTerminalProvider(executable, commandLine, out _, out var recencyGated) && recencyGated;
 
     private static IReadOnlyDictionary<ProviderId, int> MergeLiveProviders(
         IReadOnlyDictionary<ProviderId, int> desktopApps,
@@ -3406,6 +3596,29 @@ internal sealed class AgentActivityScanner
             // claiming two transcript tasks for that one process.
             merged[provider] = merged.TryGetValue(provider, out var current) ? Math.Max(current, count) : count;
         return merged;
+    }
+
+    /// <summary>
+    /// Merges desktop and terminal liveness, drops providers disabled in Settings, and keeps the
+    /// recency gate unless an interactive terminal agent (not a background app-server) is running.
+    /// </summary>
+    internal static (IReadOnlyDictionary<ProviderId, int> Live, IReadOnlySet<ProviderId> RecencyGated)
+        ResolveLiveProviders(
+            IReadOnlyDictionary<ProviderId, int> desktopApps,
+            IReadOnlySet<ProviderId> recencyGatedDesktop,
+            IReadOnlyDictionary<ProviderId, int> terminalAgents,
+            IReadOnlySet<ProviderId> recencyGatedTerminal,
+            Func<ProviderId, bool> isDisabled)
+    {
+        var live = MergeLiveProviders(desktopApps, terminalAgents)
+            .Where(entry => !isDisabled(entry.Key))
+            .ToDictionary(entry => entry.Key, entry => entry.Value);
+        var gated = recencyGatedDesktop
+            .Concat(recencyGatedTerminal)
+            .Where(provider => live.ContainsKey(provider)
+                && (!terminalAgents.ContainsKey(provider) || recencyGatedTerminal.Contains(provider)))
+            .ToHashSet();
+        return (live, gated);
     }
 
     private static IReadOnlyList<AgentActivityItem> GroupSessions(IReadOnlyList<AgentActivityItem> items)

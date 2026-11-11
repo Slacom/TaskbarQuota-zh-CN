@@ -28,6 +28,73 @@ namespace TaskbarQuota.Tests
         }
 
         [Fact]
+        public void CodexPriorityServiceTier_BillsAtFastRates()
+        {
+            var now = new DateTimeOffset(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
+            string[] Lines(string tier) => new[]
+            {
+                "{\"timestamp\":\"2026-08-05T10:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}",
+                "{\"timestamp\":\"2026-08-05T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"service_tier\":\"" + tier + "\"}}}",
+                "{\"timestamp\":\"2026-08-05T10:01:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":100000,\"output_tokens\":0,\"total_tokens\":100000}}}}",
+            };
+
+            var standard = UsageHistoryService.BuildFromLines(ProviderId.Codex, Lines("default"), now);
+            var priority = UsageHistoryService.BuildFromLines(ProviderId.Codex, Lines("priority"), now);
+
+            Assert.Equal(0.4, standard.Today!.EstimatedCostUsd!.Value, 6);
+            Assert.Equal(0.8, priority.Today!.EstimatedCostUsd!.Value, 6);
+        }
+
+        [Fact]
+        public void GrokBuildSessionUpdates_UseReportedCostAndSupersedeLegacyShellLog()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var session = Path.Combine(directory, "sessions", "C%3A%5Cwork", "s-1");
+                Directory.CreateDirectory(session);
+                var updates = Path.Combine(session, "updates.jsonl");
+                File.WriteAllLines(updates, new[]
+                {
+                    "{\"timestamp\":1785664800,\"params\":{\"sessionId\":\"s-1\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\"}}}",
+                    // Two models in one turn: grok-4.5 reports its own ticks, grok-code shares the rest.
+                    "{\"timestamp\":1785664800,\"params\":{\"sessionId\":\"s-1\",\"update\":{\"sessionUpdate\":\"turn_completed\",\"prompt_id\":\"p-1\","
+                        + "\"usage\":{\"inputTokens\":1500,\"outputTokens\":300,\"cachedReadTokens\":500,\"cacheCreationTokens\":0,\"reasoningTokens\":100,\"costUsdTicks\":30000000000,"
+                        + "\"modelUsage\":{\"grok-4.5\":{\"inputTokens\":1000,\"outputTokens\":200,\"cachedReadTokens\":500,\"reasoningTokens\":100,\"costUsdTicks\":10000000000},"
+                        + "\"grok-code\":{\"inputTokens\":500,\"outputTokens\":100,\"cachedReadTokens\":0}}}},"
+                        + "\"_meta\":{\"agentTimestampMs\":1785664800500}}}",
+                    // The same turn written again is counted once.
+                    "{\"timestamp\":1785664801,\"params\":{\"sessionId\":\"s-1\",\"update\":{\"sessionUpdate\":\"turn_completed\",\"prompt_id\":\"p-1\","
+                        + "\"usage\":{\"inputTokens\":1500,\"outputTokens\":300,\"cachedReadTokens\":500,\"costUsdTicks\":30000000000,"
+                        + "\"modelUsage\":{\"grok-4.5\":{\"inputTokens\":1000,\"outputTokens\":200,\"cachedReadTokens\":500,\"reasoningTokens\":100,\"costUsdTicks\":10000000000},"
+                        + "\"grok-code\":{\"inputTokens\":500,\"outputTokens\":100,\"cachedReadTokens\":0}}}}}}",
+                });
+                // The legacy shell log saw the same session (sid s-1) plus an older one (s-0).
+                var unified = Path.Combine(directory, "unified.jsonl");
+                File.WriteAllLines(unified, new[]
+                {
+                    "{\"ts\":\"2026-08-02T10:00:00Z\",\"pid\":7,\"sid\":\"s-1\",\"msg\":\"shell.turn.inference_done\",\"ctx\":{\"prompt_tokens\":900,\"cached_prompt_tokens\":0,\"completion_tokens\":90}}",
+                    "{\"ts\":\"2026-08-02T09:00:00Z\",\"pid\":6,\"sid\":\"s-0\",\"msg\":\"shell.turn.inference_done\",\"ctx\":{\"prompt_tokens\":40,\"cached_prompt_tokens\":0,\"completion_tokens\":10}}",
+                });
+
+                var now = new DateTimeOffset(2026, 8, 2, 12, 0, 0, TimeSpan.Zero);
+                var history = UsageHistoryService.BuildFromFilesForTesting(ProviderId.Grok, new[] { updates, unified }, now);
+
+                var today = history.Today!;
+                Assert.Equal(1800UL + 50UL, today.Tokens);
+                Assert.Equal(500UL, today.CachedInputTokens);
+                var models = today.ModelBreakdown!.Models;
+                Assert.Equal(1.0, models.Single(item => item.Model == "grok-4.5").CostUsd!.Value, 6);
+                Assert.Equal(2.0, models.Single(item => item.Model == "grok-code").CostUsd!.Value, 6);
+                Assert.Equal(2, today.Sessions);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
+        [Fact]
         public void ClaudeUsageEvents_UseReportedCostWhenAvailable()
         {
             var now = new DateTimeOffset(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
@@ -368,6 +435,317 @@ namespace TaskbarQuota.Tests
             {
                 Directory.Delete(directory, recursive: true);
             }
+        }
+
+        [Fact]
+        public void CursorDashboardEvents_UseReportedTokenBucketsAndCost()
+        {
+            var timestamp = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+            var json = $$"""
+                {"totalUsageEventsCount":"2","usageEventsDisplay":[{
+                  "timestamp":"{{timestamp}}","model":"composer-2","composerId":"session-1",
+                  "chargedCents":"0.40",
+                  "tokenUsage":{"inputTokens":"100","outputTokens":20,"cacheWriteTokens":30,"cacheReadTokens":40,"totalCents":"0.25"}
+                },{
+                  "timestamp":"{{timestamp}}","model":"composer-2","chargedCents":"0.10"
+                }]}
+                """;
+
+            var events = CursorUsageEventsClient.ParsePageForTesting(json, out var total);
+            var history = UsageHistoryService.BuildFromCursorDashboardEvents(
+                events, new DateTimeOffset(2026, 8, 5, 12, 0, 0, TimeSpan.Zero));
+
+            Assert.Equal(2, total);
+            Assert.Equal(2, events.Count);
+            Assert.Equal(190UL, history.Today!.Tokens);
+            Assert.Equal(100UL, history.Today.UncachedInputTokens);
+            Assert.Equal(30UL, history.Today.CacheCreationTokens);
+            Assert.Equal(40UL, history.Today.CachedInputTokens);
+            Assert.Equal(20UL, history.Today.OutputTokens);
+            Assert.Equal(0.0025, history.Today.EstimatedCostUsd!.Value, 6);
+            Assert.False(history.Today.CostEstimated);
+            Assert.Equal(1, history.Today.Records);
+            Assert.Equal("composer-2", history.Today.ModelBreakdown!.Models[0].Model);
+        }
+
+        [Fact]
+        public void CursorPagination_RemovesOnlyProvenPageBoundaryOverlap()
+        {
+            static CursorDashboardUsageEvent Event(string signature) => new(
+                DateTimeOffset.UnixEpoch.AddDays(1), "composer-2", new TokenBreakdown { Input = 1 },
+                0, 0, null, signature);
+            IReadOnlyList<IReadOnlyList<CursorDashboardUsageEvent>> pages =
+            [
+                new[] { Event("a"), Event("b") },
+                new[] { Event("b"), Event("c") },
+            ];
+
+            var result = CursorUsageEventsClient.ReconcileBoundaryOverlap(pages, 3);
+
+            Assert.Equal(new[] { "a", "b", "c" }, result.Select(item => item.Signature));
+        }
+
+        [Theory]
+        [InlineData("MODEL_PLACEHOLDER_M299", 1299UL, "gemini-3.7-flash")]
+        [InlineData("MODEL_PLACEHOLDER_M318", 1318UL, "gemini-3.8-flash")]
+        [InlineData("MODEL_PLACEHOLDER_M319", 1319UL, "gemini-3.8-flash")]
+        [InlineData("MODEL_PLACEHOLDER_M320", 1320UL, "gemini-3.8-flash")]
+        [InlineData("MODEL_PLACEHOLDER_M322", 1322UL, "gemini-3.8-flash")]
+        public void AntigravityDatabase_ReadsRecordedInputCacheOutputAndReasoning(
+            string placeholder,
+            ulong modelId,
+            string expectedModel)
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var path = Path.Combine(directory, "session-1.db");
+                var timestamp = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
+                CreateAntigravityDatabase(path, AntigravityGenerationBlob(
+                    placeholder, modelId, timestamp,
+                    AntigravityUsageBlob(100, 80, 20, 30, 25, 55, "response-1")));
+
+                var history = UsageHistoryService.BuildFromFilesForTesting(
+                    ProviderId.Antigravity, new[] { path }, timestamp.AddHours(2));
+
+                Assert.Equal(230UL, history.Today!.Tokens);
+                Assert.Equal(100UL, history.Today.UncachedInputTokens);
+                Assert.Equal(20UL, history.Today.CacheCreationTokens);
+                Assert.Equal(30UL, history.Today.CachedInputTokens);
+                Assert.Equal(80UL, history.Today.OutputTokens);
+                Assert.Equal(25UL, history.Today.ReasoningTokens);
+                Assert.Equal(expectedModel, history.Today.ModelBreakdown!.Models[0].Model);
+                Assert.Contains("recorded token", history.Today.ModelBreakdown.SourceNote, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
+        [Theory]
+        [InlineData("gemini-3.6-flash-tiered", 1196UL, "gemini-3.6-flash")]
+        [InlineData("Gemini 3.6 Flash (Medium)", 1072UL, "gemini-3.6-flash")]
+        [InlineData("gemini-default", 1187UL, "gemini-3.5-flash")]
+        [InlineData("gemini-3-flash-a", 1020UL, "gemini-3.5-flash")]
+        [InlineData("claude-sonnet-5-5-medium", 1404UL, "claude-sonnet-5-5")]
+        [InlineData("Claude Sonnet 4.6 (Thinking)", 1035UL, "claude-sonnet-4-6")]
+        [InlineData("MODEL_PLACEHOLDER_M196", 1196UL, "gemini-3.6-flash")]
+        // An id missing from the built-in table still resolves through the recorded name.
+        [InlineData("Gemini 3.9 Flash (High)", 1500UL, "gemini-3.9-flash")]
+        [InlineData("claude-4.7-opus-thinking", 1501UL, "claude-opus-4-7")]
+        public void AntigravityDatabase_MapsModelsToPricingKeys(string recordedName, ulong modelId, string expectedModel)
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var path = Path.Combine(directory, "session-map.db");
+                var timestamp = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
+                CreateAntigravityDatabase(path, AntigravityGenerationBlob(
+                    recordedName, modelId, timestamp,
+                    AntigravityUsageBlob(100, 20, 0, 0, 0, 20, "response-map")));
+
+                var history = UsageHistoryService.BuildFromFilesForTesting(
+                    ProviderId.Antigravity, new[] { path }, timestamp.AddHours(2));
+
+                Assert.Equal(expectedModel, history.Today!.ModelBreakdown!.Models[0].Model);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void AntigravityDatabase_StepsWithOnlyAnIdUseTheNameLearnedFromGenerations()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var path = Path.Combine(directory, "session-learn.db");
+                var timestamp = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
+                CreateAntigravityDatabase(path, AntigravityGenerationBlob(
+                    "Gemini 3.9 Pro (High)", 1600, timestamp,
+                    AntigravityUsageBlob(100, 20, 0, 0, 0, 20, "response-gen")));
+
+                // A step whose usage names only the model id (field 1), as Antigravity writes them.
+                var usage = new List<byte>();
+                ProtoVarintField(usage, 1, 1600);
+                ProtoVarintField(usage, 2, 50);
+                ProtoVarintField(usage, 3, 10);
+                ProtoBytesField(usage, 11, System.Text.Encoding.UTF8.GetBytes("response-step"));
+                var time = new List<byte>();
+                ProtoVarintField(time, 1, (ulong)timestamp.ToUnixTimeSeconds());
+                var step = new List<byte>();
+                ProtoBytesField(step, 1, time.ToArray());
+                ProtoBytesField(step, 9, usage.ToArray());
+                using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
+                {
+                    connection.Open();
+                    Execute(connection, "CREATE TABLE steps (idx INTEGER PRIMARY KEY, metadata BLOB);");
+                    using var command = connection.CreateCommand();
+                    command.CommandText = "INSERT INTO steps (idx,metadata) VALUES (0,$data)";
+                    command.Parameters.AddWithValue("$data", step.ToArray());
+                    command.ExecuteNonQuery();
+                }
+
+                var history = UsageHistoryService.BuildFromFilesForTesting(
+                    ProviderId.Antigravity, new[] { path }, timestamp.AddHours(2));
+
+                var model = Assert.Single(history.Today!.ModelBreakdown!.Models);
+                Assert.Equal("gemini-3.9-pro", model.Model);
+                Assert.Equal(180UL, history.Today.Tokens);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void AntigravityDatabase_DoesNotGuessUnknownPlaceholderModel()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var path = Path.Combine(directory, "session-2.db");
+                var timestamp = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
+                CreateAntigravityDatabase(path, AntigravityGenerationBlob(
+                    "MODEL_PLACEHOLDER_M777", 1777, timestamp,
+                    AntigravityUsageBlob(100, 20, 0, 0, 0, 20, "response-2")));
+
+                var history = UsageHistoryService.BuildFromFilesForTesting(
+                    ProviderId.Antigravity, new[] { path }, timestamp.AddHours(2));
+
+                Assert.Equal("model_placeholder_m777", history.Today!.ModelBreakdown!.Models[0].Model);
+                Assert.Null(history.Today.EstimatedCostUsd);
+                Assert.False(history.Today.EstimateComplete);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void AntigravityDatabase_ReadsLegacySystemPromptAndReasoningCounters()
+        {
+            var directory = CreateTemporaryDirectory();
+            try
+            {
+                var path = Path.Combine(directory, "legacy.db");
+                var timestamp = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
+                var usage = AntigravityLegacyUsageBlob(80, 20, 30, 40, 10, "legacy-response");
+                CreateAntigravityDatabase(path, AntigravityGenerationBlob(
+                    "gemini-3.7-flash", 0, timestamp, usage));
+
+                var history = UsageHistoryService.BuildFromFilesForTesting(
+                    ProviderId.Antigravity, new[] { path }, timestamp.AddHours(2));
+
+                Assert.Equal(180UL, history.Today!.Tokens);
+                Assert.Equal(100UL, history.Today.UncachedInputTokens);
+                Assert.Equal(30UL, history.Today.CachedInputTokens);
+                Assert.Equal(50UL, history.Today.OutputTokens);
+                Assert.Equal(10UL, history.Today.ReasoningTokens);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
+        private static void CreateAntigravityDatabase(string path, byte[] generationBlob)
+        {
+            using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+            connection.Open();
+            Execute(connection, "CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB, size INTEGER NOT NULL DEFAULT 0);");
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO gen_metadata (idx,data,size) VALUES (0,$data,$size)";
+            command.Parameters.AddWithValue("$data", generationBlob);
+            command.Parameters.AddWithValue("$size", generationBlob.Length);
+            command.ExecuteNonQuery();
+        }
+
+        private static byte[] AntigravityGenerationBlob(
+            string model,
+            ulong modelId,
+            DateTimeOffset timestamp,
+            byte[] usage)
+        {
+            var chat = new List<byte>();
+            ProtoVarintField(chat, 3, modelId);
+            ProtoBytesField(chat, 4, usage);
+            var time = new List<byte>();
+            ProtoVarintField(time, 1, (ulong)timestamp.ToUnixTimeSeconds());
+            ProtoVarintField(time, 2, 0);
+            var generationInfo = new List<byte>();
+            ProtoBytesField(generationInfo, 4, time.ToArray());
+            ProtoBytesField(chat, 9, generationInfo.ToArray());
+            ProtoBytesField(chat, 19, System.Text.Encoding.UTF8.GetBytes(model));
+            var root = new List<byte>();
+            ProtoBytesField(root, 1, chat.ToArray());
+            return root.ToArray();
+        }
+
+        private static byte[] AntigravityUsageBlob(
+            ulong input,
+            ulong totalOutput,
+            ulong cacheWrite,
+            ulong cacheRead,
+            ulong reasoning,
+            ulong visibleOutput,
+            string responseId)
+        {
+            var result = new List<byte>();
+            ProtoVarintField(result, 2, input);
+            ProtoVarintField(result, 3, totalOutput);
+            ProtoVarintField(result, 4, cacheWrite);
+            ProtoVarintField(result, 5, cacheRead);
+            ProtoVarintField(result, 9, reasoning);
+            ProtoVarintField(result, 10, visibleOutput);
+            ProtoBytesField(result, 11, System.Text.Encoding.UTF8.GetBytes(responseId));
+            return result.ToArray();
+        }
+
+        private static byte[] AntigravityLegacyUsageBlob(
+            ulong systemPrompt,
+            ulong newInput,
+            ulong cacheRead,
+            ulong output,
+            ulong reasoning,
+            string responseId)
+        {
+            var result = new List<byte>();
+            ProtoVarintField(result, 1, systemPrompt);
+            ProtoVarintField(result, 2, newInput);
+            ProtoVarintField(result, 5, cacheRead);
+            ProtoVarintField(result, 9, output);
+            ProtoVarintField(result, 10, reasoning);
+            ProtoBytesField(result, 11, System.Text.Encoding.UTF8.GetBytes(responseId));
+            return result.ToArray();
+        }
+
+        private static void ProtoVarintField(List<byte> output, ulong number, ulong value)
+        {
+            ProtoVarint(output, number << 3);
+            ProtoVarint(output, value);
+        }
+
+        private static void ProtoBytesField(List<byte> output, ulong number, byte[] value)
+        {
+            ProtoVarint(output, (number << 3) | 2);
+            ProtoVarint(output, (ulong)value.Length);
+            output.AddRange(value);
+        }
+
+        private static void ProtoVarint(List<byte> output, ulong value)
+        {
+            while (value >= 0x80)
+            {
+                output.Add((byte)((value & 0x7f) | 0x80));
+                value >>= 7;
+            }
+            output.Add((byte)value);
         }
 
         private static string CreateTemporaryDirectory()
