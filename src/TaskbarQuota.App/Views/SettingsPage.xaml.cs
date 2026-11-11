@@ -99,11 +99,13 @@ namespace TaskbarQuota.Views
             {
                 ProviderDiscoveryService.Changed -= OnProviderDiscoveryChanged;
                 ProviderDiscoveryService.Changed += OnProviderDiscoveryChanged;
-                await RefreshStartupToggleAsync();
-                Log.Information(
-                    $"Settings page loaded (surface={WidgetSettingsService.CurrentSurface}, layout={WidgetSettingsService.Current})");
                 WidgetSettingsService.Changed -= OnWidgetSettingsChanged;
                 WidgetSettingsService.Changed += OnWidgetSettingsChanged;
+                await RefreshStartupToggleAsync();
+                if (!IsLoaded)
+                    return;
+                Log.Information(
+                    $"Settings page loaded (surface={WidgetSettingsService.CurrentSurface}, layout={WidgetSettingsService.Current})");
                 ViewModel.ReloadProviders();
                 BuildTaskbarPlacementOptions();
                 BuildPinOptions();

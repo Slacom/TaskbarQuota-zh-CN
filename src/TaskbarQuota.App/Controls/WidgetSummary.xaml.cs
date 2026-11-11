@@ -1092,41 +1092,23 @@ namespace TaskbarQuota.Controls
         {
             isRowVisible ??= row => WidgetSettingsService.IsRowVisible(ProviderId.Antigravity, row);
             var rows = new List<WidgetUsageRow>();
-            // Icon already conveys the model family (Gemini vs Non-Gemini), so the widget row only needs the window.
+            // The icon already conveys the model family; rows need only the window name.
             if (isRowVisible(WidgetSettingsService.RowPrimary))
-            {
-                rows.Add(new WidgetUsageRow("Weekly", WidgetSettingsService.DisplayPercent(usage.Primary.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.Primary.UsedPercent), usage.Primary.ResetDescription,
-                    ResetAt: usage.Primary.ResetAt,
-                    ResetWindowMinutes: usage.Primary.WindowMinutes,
-                    GlyphData: ProviderGlyphs.Gemini));
-            }
+                rows.Add(WindowRow("Weekly", usage.Primary, ProviderGlyphs.Gemini));
             if (usage.ModelSpecific != null && isRowVisible(WidgetSettingsService.RowModelSpecific))
-            {
-                rows.Add(new WidgetUsageRow("5h", WidgetSettingsService.DisplayPercent(usage.ModelSpecific.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.ModelSpecific.UsedPercent), usage.ModelSpecific.ResetDescription,
-                    ResetAt: usage.ModelSpecific.ResetAt,
-                    ResetWindowMinutes: usage.ModelSpecific.WindowMinutes,
-                    GlyphData: ProviderGlyphs.Gemini));
-            }
+                rows.Add(WindowRow("5h", usage.ModelSpecific, ProviderGlyphs.Gemini));
             if (usage.Secondary != null && isRowVisible(WidgetSettingsService.RowSecondary))
-            {
-                rows.Add(new WidgetUsageRow("Weekly", WidgetSettingsService.DisplayPercent(usage.Secondary.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.Secondary.UsedPercent), usage.Secondary.ResetDescription,
-                    ResetAt: usage.Secondary.ResetAt,
-                    ResetWindowMinutes: usage.Secondary.WindowMinutes,
-                    GlyphData: ProviderGlyphs.GeminiBarred));
-            }
+                rows.Add(WindowRow("Weekly", usage.Secondary, ProviderGlyphs.GeminiBarred));
             if (usage.Monthly != null && isRowVisible(WidgetSettingsService.RowMonthly))
-            {
-                rows.Add(new WidgetUsageRow("5h", WidgetSettingsService.DisplayPercent(usage.Monthly.UsedPercent),
-                    WidgetSettingsService.FormatDisplayPercent(usage.Monthly.UsedPercent), usage.Monthly.ResetDescription,
-                    ResetAt: usage.Monthly.ResetAt,
-                    ResetWindowMinutes: usage.Monthly.WindowMinutes,
-                    GlyphData: ProviderGlyphs.GeminiBarred));
-            }
+                rows.Add(WindowRow("5h", usage.Monthly, ProviderGlyphs.GeminiBarred));
             return rows;
         }
+
+        internal static IReadOnlyList<(string Label, string Value, bool HasBar, PaceSeverity? Pace, double? PaceTick)>
+            GetAntigravityDisplayForTesting(UsageSnapshot usage)
+            => BuildAntigravityRows(usage, _ => true)
+                .Select(row => (row.Label, row.Value, row.HasBar, row.Pace, row.PaceTickPercent))
+                .ToArray();
 
         internal static IReadOnlyList<(string Label, DateTimeOffset? ResetAt, int? ResetWindowMinutes)>
             GetAntigravityResetMetadataForTesting(UsageSnapshot usage)

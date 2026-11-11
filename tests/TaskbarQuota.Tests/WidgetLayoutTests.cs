@@ -64,6 +64,32 @@ public sealed class WidgetLayoutTests
     }
 
     [Fact]
+    public void AntigravityRows_UseIncludedAndPaceSemantics()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var usage = new UsageSnapshot(new RateWindow(10, 10080, now.AddDays(3), "3天") { IsIncluded = false })
+        {
+            Secondary = new RateWindow(50, 10080, now.AddDays(3.5), "3天"),
+        };
+
+        var rows = WidgetSummary.GetAntigravityDisplayForTesting(usage);
+
+        Assert.Collection(
+            rows,
+            excluded =>
+            {
+                Assert.False(excluded.HasBar);
+                Assert.Equal("未包含", excluded.Value);
+                Assert.Null(excluded.Pace);
+            },
+            included =>
+            {
+                Assert.True(included.HasBar);
+                Assert.NotNull(included.Pace);
+            });
+    }
+
+    [Fact]
     public void AntigravityRows_PreserveResetMetadataForEveryWindow()
     {
         var primaryReset = new DateTimeOffset(2026, 10, 4, 9, 6, 0, TimeSpan.FromHours(8));
@@ -83,25 +109,25 @@ public sealed class WidgetLayoutTests
             rows,
             row =>
             {
-                Assert.Equal("Weekly", row.Label);
+                Assert.Equal("每周额度", row.Label);
                 Assert.Equal(primaryReset, row.ResetAt);
                 Assert.Equal(10080, row.ResetWindowMinutes);
             },
             row =>
             {
-                Assert.Equal("5h", row.Label);
+                Assert.Equal("5小时", row.Label);
                 Assert.Equal(modelReset, row.ResetAt);
                 Assert.Equal(300, row.ResetWindowMinutes);
             },
             row =>
             {
-                Assert.Equal("Weekly", row.Label);
+                Assert.Equal("每周额度", row.Label);
                 Assert.Equal(secondaryReset, row.ResetAt);
                 Assert.Equal(10080, row.ResetWindowMinutes);
             },
             row =>
             {
-                Assert.Equal("5h", row.Label);
+                Assert.Equal("5小时", row.Label);
                 Assert.Equal(monthlyReset, row.ResetAt);
                 Assert.Equal(43200, row.ResetWindowMinutes);
             });

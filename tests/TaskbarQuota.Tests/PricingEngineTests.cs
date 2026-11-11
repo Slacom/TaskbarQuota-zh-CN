@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Text.Json;
 using TaskbarQuota.Usage;
 using Xunit;
@@ -223,6 +224,50 @@ namespace TaskbarQuota.Tests
             Assert.NotNull(rates);
             Assert.Equal(8, rates.InputPerMillion, 6);
             Assert.Equal(40, rates.OutputPerMillion, 6);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void ReadCatalog_ZeroRatesDoNotOverwriteValidRates(bool zeroLast)
+        {
+            string valid = "\"GLM-5.2\":{\"cost\":{\"input\":1.2,\"output\":4.1}}";
+            string zero = "\"glm-5.2\":{\"cost\":{\"input\":0,\"output\":0,\"cache_read\":0}}";
+            string json = "{\"models\":{" + (zeroLast ? valid + "," + zero : zero + "," + valid) + "}}";
+            string path = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(path, json);
+
+                var rates = PricingCatalogStore.ReadCatalogForTesting(path)["glm-5.2"];
+
+                Assert.Equal(1.2, rates.InputPerMillion, 6);
+                Assert.Equal(4.1, rates.OutputPerMillion, 6);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Fact]
+        public void ReadCatalog_AllowsAnOnlyZeroRateEntry()
+        {
+            string json = "{\"models\":{\"glm-5.2\":{\"cost\":{\"input\":0,\"output\":0}}}}";
+            string path = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(path, json);
+
+                var rates = PricingCatalogStore.ReadCatalogForTesting(path)["glm-5.2"];
+
+                Assert.Equal(0, rates.InputPerMillion);
+                Assert.Equal(0, rates.OutputPerMillion);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
         }
 
         [Fact]

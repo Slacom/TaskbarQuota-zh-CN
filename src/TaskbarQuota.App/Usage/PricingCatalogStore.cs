@@ -118,6 +118,8 @@ internal sealed class PricingCatalogStore
         catch { return new Supplement(new(StringComparer.OrdinalIgnoreCase), new(), new(StringComparer.OrdinalIgnoreCase)); }
     }
 
+    internal static Dictionary<string, ModelRates> ReadCatalogForTesting(string path) => ReadCatalog(path);
+
     private static Dictionary<string, ModelRates> ReadCatalog(string path)
     {
         var result = new Dictionary<string, ModelRates>(StringComparer.OrdinalIgnoreCase);
